@@ -1,17 +1,30 @@
 """MemPalace — long-term memory layer for per-repo knowledge.
 
-Stores bugs, decisions, failures, ownership notes, and historical context
-in `.scope-intelligence/mempalace.jsonl`. Every entry is scoped to the
-files/features/symbols it concerns.
+Four memory types, each serving a distinct cognitive role:
 
-The fetch path deliberately routes through the Phase 1-3 scope engine:
-  fetch(feature="auth")
-    → get_feature_scope("auth")         # resolves exact files
-    → find_impacted_files(file=...)     # expands to affected neighbours
-    → filter mempalace entries by overlap
-    → log as query_log entry            # feeds scope report
+  semantic   — Timeless facts about the codebase. Always surfaced first,
+                ranked by confidence, never aged out by recency.
+                E.g. "auth uses HS256 JWT signing", "billing is PCI-scoped".
 
-This means every mem fetch exercises and validates the full pipeline.
+  procedure  — Repo-specific step-by-step workflows discovered from real work.
+                Structured as ordered steps[], not free text.
+                E.g. "how to add a new API endpoint in this repo".
+
+  episodic   — Specific past incidents: bugs, decisions, failures, fixes.
+                Ranked by recency — what happened recently matters most.
+                E.g. "float rounding broke currency in charge(), use Decimal".
+
+  scope      — Structural memory. This is handled entirely by the Phase 1-3
+                index (.scope-intelligence/). NOT stored in mempalace.jsonl.
+                fetch_relevant() injects a live structural slice into results.
+
+Fetch layering (what Claude sees before touching a file):
+  1. structural  — live scope slice from Phase 1-3 engine (always injected)
+  2. semantic    — timeless facts sorted by confidence desc
+  3. procedural  — step-by-step workflows for this scope
+  4. episodic    — past incidents newest-first
+
+Storage: .scope-intelligence/mempalace.jsonl (append-only JSONL)
 """
 from __future__ import annotations
 
@@ -29,7 +42,9 @@ from .query_engine import (
 )
 from .tracker import log_query
 
-VALID_TYPES = ("bug", "decision", "failure", "ownership", "note", "fix")
+# episodic subtypes + the two new first-class types
+EPISODIC_TYPES = ("bug", "decision", "failure", "ownership", "note", "fix")
+VALID_TYPES = ("semantic", "procedure") + EPISODIC_TYPES
 
 
 # ---------------------------------------------------------------------------
@@ -52,12 +67,20 @@ def add_memory(
     tags: Optional[list] = None,
     author: str = "",
     resolved: bool = False,
+    # semantic-only
+    confidence: float = 1.0,
+    # procedure-only
+    steps: Optional[list] = None,
 ) -> dict:
     """Append one memory entry to mempalace.jsonl and return it."""
     if not store.is_initialized(repo_root):
         return {"error": "repo not indexed — run scope init first"}
     if kind not in VALID_TYPES:
         return {"error": f"type must be one of: {', '.join(VALID_TYPES)}"}
+    if kind == "procedure" and not steps:
+        return {"error": "procedure memories require --step entries"}
+    if kind == "semantic" and not (0.0 <= confidence <= 1.0):
+        return {"error": "confidence must be between 0.0 and 1.0"}
 
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     entry: dict = {
@@ -74,13 +97,57 @@ def add_memory(
         "author":   author,
         "resolved": resolved,
     }
+    if kind == "semantic":
+        entry["confidence"] = round(float(confidence), 2)
+    if kind == "procedure":
+        entry["steps"] = list(steps or [])
+
     store.append_mempalace(repo_root, entry)
     return entry
 
 
 # ---------------------------------------------------------------------------
-# Fetch — Phase 1-3 integration is here
+# Fetch — Phase 1-3 integration + four-layer result
 # ---------------------------------------------------------------------------
+
+def _structural_slice(
+    repo_root: Path,
+    scope_files: set,
+    scope_features: set,
+    scope_symbols: set,
+) -> dict:
+    """Build a compact structural summary from the live Phase 1-3 index."""
+    deps = store.read_json(repo_root, "dependencies", {"files": {}})
+    files_index = deps.get("files", {})
+
+    feature_summaries: list = []
+    features_data = store.read_json(repo_root, "features", {"features": []})
+    for feat in features_data.get("features", []):
+        if feat.get("id") in scope_features:
+            feature_summaries.append({
+                "id":          feat["id"],
+                "file_count":  feat.get("file_count", 0),
+                "symbol_count": feat.get("symbol_count", 0),
+                "languages":   feat.get("languages", []),
+                "depends_on":  feat.get("depends_on_features", []),
+            })
+
+    file_details: list = []
+    for f in sorted(scope_files):
+        meta = files_index.get(f, {})
+        file_details.append({
+            "file":     f,
+            "loc":      meta.get("loc", 0),
+            "language": meta.get("language", "?"),
+            "symbols":  len(meta.get("symbols", [])),
+        })
+
+    return {
+        "features": feature_summaries,
+        "files":    file_details,
+        "symbols":  sorted(scope_symbols),
+    }
+
 
 def fetch_relevant(
     repo_root: Path,
@@ -92,10 +159,18 @@ def fetch_relevant(
     include_resolved: bool = False,
     limit: int = 20,
 ) -> dict:
-    """Return memory entries relevant to the requested scope.
+    """Return a four-layer memory response for the given scope.
 
-    Uses Phase 1-3 scope engine to resolve the full set of related
-    files/features/symbols before filtering mempalace entries.
+    Layers returned (in priority order):
+      structural — live Phase 1-3 scope slice (always present)
+      semantic   — timeless facts, confidence desc
+      procedural — step-by-step workflows
+      episodic   — past incidents, newest first
+
+    Phase 1-3 queries used internally:
+      get_feature_scope()    → resolves files + feature metadata
+      find_impacted_files()  → expands to affected neighbours
+      get_symbol_context()   → expands via call graph
     """
     if not store.is_initialized(repo_root):
         return {"error": "repo not indexed — run scope init first"}
@@ -105,7 +180,7 @@ def fetch_relevant(
     scope_symbols: set = set()
     scope_errors: list = []
 
-    # --- resolve scope using Phase 1-3 queries ---
+    # --- Phase 1-3 scope resolution ---
 
     if feature:
         result = get_feature_scope(repo_root, feature)
@@ -116,13 +191,11 @@ def fetch_relevant(
             feat = result.get("feature", {})
             scope_features.add(feat.get("id", feature))
             scope_features.update(feat.get("aliases", []))
-            # also pull files from related tests
             for t in result.get("tests", []):
                 scope_files.add(t["file"])
 
     if file:
         scope_files.add(file)
-        # expand to direct neighbours via impacted
         impact = find_impacted_files(repo_root, file=file)
         if "error" not in impact:
             scope_files.update(impact.get("direct", []))
@@ -138,19 +211,18 @@ def fetch_relevant(
                     scope_files.add(sym["file"])
                 if sym.get("feature"):
                     scope_features.add(sym["feature"])
-                # callers and callees files
                 for c in m.get("callers", []) + m.get("callees", []):
                     if c.get("file"):
                         scope_files.add(c["file"])
 
-    if not feature and not file and not symbol:
-        # no scope filter — return everything
-        pass
-
-    # --- filter mempalace ---
+    # --- filter mempalace entries ---
 
     all_entries = store.read_mempalace(repo_root)
-    matched: list = []
+    has_scope_filter = bool(feature or file or symbol)
+
+    semantic_matches: list = []
+    procedure_matches: list = []
+    episodic_matches: list = []
 
     for e in all_entries:
         if e.get("resolved") and not include_resolved:
@@ -163,19 +235,41 @@ def fetch_relevant(
         e_feats = set(e_scope.get("features", []))
         e_syms = set(e_scope.get("symbols", []))
 
-        # match if any scope dimension overlaps, OR no scope filter was given
-        if not (feature or file or symbol):
-            matched.append(e)
-        elif (e_files & scope_files
-              or e_feats & scope_features
-              or e_syms & scope_symbols):
-            matched.append(e)
+        relevant = (
+            not has_scope_filter
+            or e_files & scope_files
+            or e_feats & scope_features
+            or e_syms & scope_symbols
+        )
+        if not relevant:
+            continue
 
-    # newest first
-    matched.sort(key=lambda x: x.get("ts", ""), reverse=True)
-    matched = matched[:limit]
+        etype = e.get("type", "note")
+        if etype == "semantic":
+            semantic_matches.append(e)
+        elif etype == "procedure":
+            procedure_matches.append(e)
+        else:
+            episodic_matches.append(e)
 
-    # log as a scope query so it feeds the token savings report
+    # semantic: highest confidence first (timeless facts don't age)
+    semantic_matches.sort(key=lambda x: -x.get("confidence", 1.0))
+
+    # procedure: most recently updated first
+    procedure_matches.sort(key=lambda x: x.get("ts", ""), reverse=True)
+
+    # episodic: newest first (recent incidents are most relevant)
+    episodic_matches.sort(key=lambda x: x.get("ts", ""), reverse=True)
+
+    # apply per-layer limits (semantic: all, procedure: all, episodic: capped)
+    episodic_matches = episodic_matches[:limit]
+
+    # inject structural layer from live Phase 1-3 index
+    structural = _structural_slice(
+        repo_root, scope_files, scope_features, scope_symbols
+    )
+
+    # log as scope query for token savings report
     log_query(
         repo_root,
         "mem_fetch",
@@ -183,15 +277,26 @@ def fetch_relevant(
         list(scope_files),
     )
 
+    total = len(semantic_matches) + len(procedure_matches) + len(episodic_matches)
     result: dict = {
-        "query": {"feature": feature, "file": file, "symbol": symbol, "kind": kind},
+        "query": {
+            "feature": feature,
+            "file":    file,
+            "symbol":  symbol,
+            "kind":    kind,
+        },
         "resolved_scope": {
             "files":    sorted(scope_files),
             "features": sorted(scope_features),
             "symbols":  sorted(scope_symbols),
         },
-        "matches": matched,
-        "total": len(matched),
+        "layers": {
+            "structural": structural,
+            "semantic":   semantic_matches,
+            "procedural": procedure_matches,
+            "episodic":   episodic_matches,
+        },
+        "total": total,
     }
     if scope_errors:
         result["warnings"] = scope_errors
@@ -199,7 +304,7 @@ def fetch_relevant(
 
 
 # ---------------------------------------------------------------------------
-# List — unfiltered view with optional type/tag filter
+# List
 # ---------------------------------------------------------------------------
 
 def list_memories(
@@ -228,11 +333,10 @@ def list_memories(
 
 
 # ---------------------------------------------------------------------------
-# Resolve — mark a memory entry as resolved
+# Resolve
 # ---------------------------------------------------------------------------
 
 def resolve_memory(repo_root: Path, mem_id: str) -> dict:
-    """Rewrite mempalace.jsonl with the target entry marked resolved."""
     entries = store.read_mempalace(repo_root)
     found = False
     updated: list = []
@@ -247,9 +351,8 @@ def resolve_memory(repo_root: Path, mem_id: str) -> dict:
     if not found:
         return {"error": f"no entry with id '{mem_id}'"}
 
-    # rewrite the file
-    path = store.mempalace_path(repo_root)
     import json as _json
+    path = store.mempalace_path(repo_root)
     with path.open("w", encoding="utf-8") as f:
         for e in updated:
             f.write(_json.dumps(e, ensure_ascii=False) + "\n")
@@ -257,15 +360,10 @@ def resolve_memory(repo_root: Path, mem_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Churn — git-based change frequency (uses git, graceful fallback)
+# Churn
 # ---------------------------------------------------------------------------
 
 def compute_churn(repo_root: Path, days: int = 90) -> dict:
-    """Count how often each file changed in the last N days via git log.
-
-    Cross-references with the scope feature map to surface high-churn features.
-    Falls back gracefully if git is unavailable.
-    """
     try:
         result = subprocess.run(
             ["git", "log", f"--since={days} days ago",
@@ -278,7 +376,6 @@ def compute_churn(repo_root: Path, days: int = 90) -> dict:
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         return {"error": str(e)}
 
-    # count appearances
     churn: dict = {}
     for line in result.stdout.splitlines():
         f = line.strip()
@@ -289,7 +386,6 @@ def compute_churn(repo_root: Path, days: int = 90) -> dict:
         return {"days": days, "files": {}, "features": {},
                 "note": "no changes found in git log for this period"}
 
-    # cross-reference with feature map
     features_data = store.read_json(repo_root, "features", {"features": []})
     feat_churn: dict = {}
     for feat in features_data.get("features", []):
@@ -310,14 +406,12 @@ def compute_churn(repo_root: Path, days: int = 90) -> dict:
         "days": days,
         "total_changed_files": len(churn),
         "top_files": [{"file": f, "changes": n} for f, n in top_files],
-        "features": {
-            fid: v for fid, v in top_features
-        },
+        "features": {fid: v for fid, v in top_features},
     }
 
 
 # ---------------------------------------------------------------------------
-# Summary stats (used by scope report)
+# Summary stats
 # ---------------------------------------------------------------------------
 
 def memory_stats(repo_root: Path) -> dict:

@@ -181,17 +181,23 @@ TOOLS: list[dict] = [
     # --- Phase 4: MemPalace tools ---
     {
         "name": "mem_add",
-        "description": "Record a long-term memory (bug, decision, failure, ownership, note, fix) scoped to files/features/symbols.",
+        "description": (
+            "Record a long-term memory scoped to files/features/symbols. "
+            "Types: semantic (timeless fact, use confidence field), "
+            "procedure (step-by-step workflow, use steps field), "
+            "or episodic (bug/decision/failure/ownership/note/fix)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 **_REPO_PROP,
                 "type": {
                     "type": "string",
-                    "enum": ["bug", "decision", "failure", "ownership", "note", "fix"],
+                    "enum": ["semantic", "procedure",
+                             "bug", "decision", "failure", "ownership", "note", "fix"],
                     "description": "Memory type.",
                 },
-                "note": {"type": "string", "description": "The memory text."},
+                "note": {"type": "string", "description": "The memory text or title."},
                 "files": {"type": "array", "items": {"type": "string"},
                           "description": "Repo-relative file paths this concerns."},
                 "features": {"type": "array", "items": {"type": "string"},
@@ -201,13 +207,26 @@ TOOLS: list[dict] = [
                 "tags": {"type": "array", "items": {"type": "string"}},
                 "author": {"type": "string"},
                 "resolved": {"type": "boolean", "default": False},
+                "confidence": {
+                    "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 1.0,
+                    "description": "Confidence level for semantic facts (0.0-1.0).",
+                },
+                "steps": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": "Ordered steps for procedure memories.",
+                },
             },
             "required": ["note"],
         },
     },
     {
         "name": "mem_fetch",
-        "description": "Fetch memories relevant to a feature/file/symbol. Uses the scope engine to resolve related files before filtering.",
+        "description": (
+            "Fetch layered memories relevant to a feature/file/symbol. "
+            "Returns four layers: structural (live scope), semantic (facts), "
+            "procedural (workflows), episodic (past incidents). "
+            "Uses Phase 1-3 scope engine internally to resolve exact files."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -217,7 +236,8 @@ TOOLS: list[dict] = [
                 "symbol": {"type": "string", "description": "Symbol name."},
                 "type": {
                     "type": "string",
-                    "enum": ["bug", "decision", "failure", "ownership", "note", "fix"],
+                    "enum": ["semantic", "procedure",
+                             "bug", "decision", "failure", "ownership", "note", "fix"],
                     "description": "Filter to one memory type.",
                 },
                 "include_resolved": {"type": "boolean", "default": False},
@@ -234,7 +254,8 @@ TOOLS: list[dict] = [
                 **_REPO_PROP,
                 "type": {
                     "type": "string",
-                    "enum": ["bug", "decision", "failure", "ownership", "note", "fix"],
+                    "enum": ["semantic", "procedure",
+                             "bug", "decision", "failure", "ownership", "note", "fix"],
                 },
                 "tag": {"type": "string"},
                 "include_resolved": {"type": "boolean", "default": True},
@@ -317,6 +338,8 @@ def _call_tool(name: str, arguments: dict) -> dict:
             tags=arguments.get("tags", []),
             author=arguments.get("author", ""),
             resolved=arguments.get("resolved", False),
+            confidence=arguments.get("confidence", 1.0),
+            steps=arguments.get("steps"),
         )
     if name == "mem_fetch":
         return fetch_relevant(

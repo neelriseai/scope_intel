@@ -150,9 +150,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_madd = mem_sub.add_parser("add", help="Record a memory (bug, decision, failure, etc.)")
     p_madd.add_argument("--repo", default=".")
     p_madd.add_argument("--type", dest="kind", default="note",
-                        choices=["bug", "decision", "failure", "ownership", "note", "fix"],
+                        choices=["semantic", "procedure",
+                                 "bug", "decision", "failure", "ownership", "note", "fix"],
                         help="Memory type (default: note).")
-    p_madd.add_argument("--note", required=True, help="The memory text.")
+    p_madd.add_argument("--note", required=True, help="The memory text / title.")
     p_madd.add_argument("--file", nargs="+", dest="files", default=[],
                         help="Repo-relative files this memory concerns.")
     p_madd.add_argument("--feature", nargs="+", dest="features", default=[],
@@ -164,16 +165,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_madd.add_argument("--author", default="", help="Author identifier.")
     p_madd.add_argument("--resolved", action="store_true",
                         help="Mark this entry as already resolved.")
+    p_madd.add_argument("--confidence", type=float, default=1.0,
+                        help="Confidence 0.0-1.0 for semantic facts (default: 1.0).")
+    p_madd.add_argument("--step", action="append", dest="steps", default=[],
+                        metavar="STEP",
+                        help="One step for a procedure memory. Repeat flag for each step.")
 
     # mem fetch — uses Phase 1-3 scope engine internally
     p_mfetch = mem_sub.add_parser(
-        "fetch", help="Fetch memories relevant to a feature/file/symbol.")
+        "fetch", help="Fetch layered memories relevant to a feature/file/symbol.")
     p_mfetch.add_argument("--repo", default=".")
     p_mfetch.add_argument("--feature", help="Feature id or alias.")
     p_mfetch.add_argument("--file", help="Repo-relative file path.")
     p_mfetch.add_argument("--symbol", help="Symbol name.")
     p_mfetch.add_argument("--type", dest="kind",
-                          choices=["bug", "decision", "failure", "ownership", "note", "fix"],
+                          choices=["semantic", "procedure",
+                                   "bug", "decision", "failure", "ownership", "note", "fix"],
                           help="Filter to one memory type.")
     p_mfetch.add_argument("--include-resolved", action="store_true",
                           help="Include already-resolved entries.")
@@ -185,7 +192,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_mlist = mem_sub.add_parser("list", help="List all memories (with optional filters).")
     p_mlist.add_argument("--repo", default=".")
     p_mlist.add_argument("--type", dest="kind",
-                         choices=["bug", "decision", "failure", "ownership", "note", "fix"])
+                         choices=["semantic", "procedure",
+                                  "bug", "decision", "failure", "ownership", "note", "fix"])
     p_mlist.add_argument("--tag")
     p_mlist.add_argument("--open-only", action="store_true",
                          help="Hide resolved entries.")
@@ -398,49 +406,95 @@ def _fmt_touchpoints(s: dict) -> None:
             print(f"  {e.get('name')}  [{e.get('kind')}]  [{e.get('file', '')}]")
 
 
-def _fmt_mem_entry(e: dict) -> None:
+def _fmt_mem_entry(e: dict, indent: str = "  ") -> None:
     status = "[resolved]" if e.get("resolved") else "[open]"
-    tags = f"  tags: {', '.join(e['tags'])}" if e.get("tags") else ""
+    etype = e.get("type", "note")
+    # type-specific prefix
+    if etype == "semantic":
+        conf = e.get("confidence", 1.0)
+        type_str = f"[semantic  conf={conf:.0%}]"
+    elif etype == "procedure":
+        type_str = f"[procedure steps={len(e.get('steps', []))}]"
+    else:
+        type_str = f"[{etype}]"
+
+    print(f"{indent}{e['id']}  {type_str} {status}  {e.get('ts','')}")
+    print(f"{indent}{e['note']}")
+
+    if etype == "procedure" and e.get("steps"):
+        for i, step in enumerate(e["steps"], 1):
+            print(f"{indent}  {i}. {step}")
+
     scope = e.get("scope", {})
-    files = scope.get("files", [])
-    feats = scope.get("features", [])
-    syms = scope.get("symbols", [])
-    print(f"  {e['id']}  [{e['type']}] {status}  {e.get('ts','')}")
-    print(f"  {e['note']}")
-    if files:
-        print(f"  files: {', '.join(files)}")
-    if feats:
-        print(f"  features: {', '.join(feats)}")
-    if syms:
-        print(f"  symbols: {', '.join(syms)}")
-    if tags:
-        print(tags)
+    if scope.get("files"):
+        print(f"{indent}files: {', '.join(scope['files'])}")
+    if scope.get("features"):
+        print(f"{indent}features: {', '.join(scope['features'])}")
+    if scope.get("symbols"):
+        print(f"{indent}symbols: {', '.join(scope['symbols'])}")
+    if e.get("tags"):
+        print(f"{indent}tags: {', '.join(e['tags'])}")
     print()
 
 
 def _fmt_mem_fetch(s: dict) -> None:
     if "error" in s:
         print(s["error"]); return
+
     rscope = s.get("resolved_scope", {})
-    print(f"resolved scope: files={len(rscope.get('files',[]))}  "
-          f"features={len(rscope.get('features',[]))}  "
-          f"symbols={len(rscope.get('symbols',[]))}")
+    print(f"resolved scope: "
+          f"files={len(rscope.get('files', []))}  "
+          f"features={len(rscope.get('features', []))}  "
+          f"symbols={len(rscope.get('symbols', []))}")
     if rscope.get("features"):
         print(f"  features: {', '.join(sorted(rscope['features']))}")
     if rscope.get("files"):
-        print(f"  files: {', '.join(sorted(rscope['files'])[:5])}"
-              + (f"  +{len(rscope['files'])-5} more" if len(rscope['files']) > 5 else ""))
-    if s.get("warnings"):
-        for w in s["warnings"]:
-            print(f"  warning: {w}")
-    matches = s.get("matches", [])
-    print(f"\nmatched {len(matches)} memor{'y' if len(matches)==1 else 'ies'}:")
-    print("-" * 60)
-    if not matches:
-        print("  (none — add memories with: scope mem add --note \"...\")")
-        return
-    for e in matches:
-        _fmt_mem_entry(e)
+        shown = sorted(rscope["files"])[:5]
+        more = len(rscope["files"]) - 5
+        print(f"  files: {', '.join(shown)}" + (f"  +{more} more" if more > 0 else ""))
+    for w in s.get("warnings", []):
+        print(f"  warning: {w}")
+
+    layers = s.get("layers", {})
+
+    # Structural layer — compact summary
+    struct = layers.get("structural", {})
+    if struct.get("features") or struct.get("files"):
+        print("\n[structural]")
+        for feat in struct.get("features", []):
+            deps = f"  depends: {', '.join(feat['depends_on'])}" if feat.get("depends_on") else ""
+            print(f"  feature {feat['id']}: "
+                  f"{feat['file_count']} files  {feat['symbol_count']} symbols  "
+                  f"lang={','.join(feat.get('languages', []))}{deps}")
+        for f in struct.get("files", []):
+            print(f"  {f['file']}  [{f['language']}]  {f['loc']} loc  {f['symbols']} symbols")
+
+    # Semantic layer — timeless facts
+    sem = layers.get("semantic", [])
+    if sem:
+        print(f"\n[semantic facts]  ({len(sem)})")
+        print("-" * 50)
+        for e in sem:
+            _fmt_mem_entry(e)
+
+    # Procedural layer — step-by-step workflows
+    proc = layers.get("procedural", [])
+    if proc:
+        print(f"\n[procedural workflows]  ({len(proc)})")
+        print("-" * 50)
+        for e in proc:
+            _fmt_mem_entry(e)
+
+    # Episodic layer — past incidents
+    epi = layers.get("episodic", [])
+    if epi:
+        print(f"\n[episodic incidents]  ({len(epi)})")
+        print("-" * 50)
+        for e in epi:
+            _fmt_mem_entry(e)
+
+    if s.get("total", 0) == 0:
+        print("\n  (no memories yet — add with: scope mem add --note \"...\")")
 
 
 def _fmt_mem_list(s: dict) -> None:
@@ -743,6 +797,8 @@ def cmd_mem(args) -> int:
             tags=args.tags,
             author=args.author,
             resolved=args.resolved,
+            confidence=args.confidence,
+            steps=args.steps or None,
         )
         if "error" in result:
             print(result["error"], file=sys.stderr); return 2
