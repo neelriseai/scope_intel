@@ -1,0 +1,14 @@
+{
+  "auth": [
+    "auth"
+  ],
+  "billing": [
+    "billing"
+  ],
+  "frontend": [
+    "frontend"
+  ],
+  "tests": [
+    "tests"
+  ]
+}

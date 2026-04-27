@@ -1,0 +1,175 @@
+{
+  "repo_root": "C:\\Users\\neela\\Documents\\Generic Intelligence Stratgy\\scope-intelligence-toolkit\\examples\\sample-repo",
+  "totals": {
+    "files": 17,
+    "symbols": 34,
+    "tests": 4,
+    "features": 6
+  },
+  "languages": {
+    "python": 11,
+    "java": 3,
+    "playwright": 1,
+    "javascript": 2
+  },
+  "test_frameworks": {
+    "pytest": 2,
+    "junit": 1,
+    "playwright": 1
+  },
+  "test_languages": {
+    "python": 2,
+    "java": 1,
+    "playwright": 1
+  },
+  "top_features": [
+    {
+      "id": "auth",
+      "files": 4,
+      "symbols": 11,
+      "languages": [
+        "python"
+      ],
+      "tests": 2
+    },
+    {
+      "id": "checkout",
+      "files": 4,
+      "symbols": 7,
+      "languages": [
+        "python"
+      ],
+      "tests": 1
+    },
+    {
+      "id": "billing",
+      "files": 3,
+      "symbols": 10,
+      "languages": [
+        "java"
+      ],
+      "tests": 1
+    },
+    {
+      "id": "frontend",
+      "files": 2,
+      "symbols": 4,
+      "languages": [
+        "javascript"
+      ],
+      "tests": 0
+    },
+    {
+      "id": "users",
+      "files": 2,
+      "symbols": 2,
+      "languages": [
+        "python"
+      ],
+      "tests": 0
+    },
+    {
+      "id": "e2e",
+      "files": 1,
+      "symbols": 0,
+      "languages": [
+        "playwright"
+      ],
+      "tests": 1
+    }
+  ],
+  "largest_files": [
+    {
+      "file": "src/auth/login.py",
+      "loc": 47,
+      "language": "python"
+    },
+    {
+      "file": "src/billing/PaymentController.java",
+      "loc": 38,
+      "language": "java"
+    },
+    {
+      "file": "tests/billing/PaymentControllerTest.java",
+      "loc": 23,
+      "language": "java"
+    },
+    {
+      "file": "tests/e2e/login.spec.ts",
+      "loc": 17,
+      "language": "playwright"
+    },
+    {
+      "file": "src/frontend/apiClient.js",
+      "loc": 17,
+      "language": "javascript"
+    },
+    {
+      "file": "src/frontend/loginForm.js",
+      "loc": 16,
+      "language": "javascript"
+    },
+    {
+      "file": "src/auth/session.py",
+      "loc": 15,
+      "language": "python"
+    },
+    {
+      "file": "src/checkout/cart.py",
+      "loc": 15,
+      "language": "python"
+    },
+    {
+      "file": "src/users/repository.py",
+      "loc": 15,
+      "language": "python"
+    },
+    {
+      "file": "tests/auth/test_login.py",
+      "loc": 13,
+      "language": "python"
+    }
+  ],
+  "most_imported_files": [
+    {
+      "file": "src/auth/session.py",
+      "imported_by": 2,
+      "language": "python"
+    },
+    {
+      "file": "src/billing/PaymentService.java",
+      "imported_by": 2,
+      "language": "java"
+    },
+    {
+      "file": "src/checkout/cart.py",
+      "imported_by": 2,
+      "language": "python"
+    },
+    {
+      "file": "src/users/repository.py",
+      "imported_by": 2,
+      "language": "python"
+    },
+    {
+      "file": "src/auth/login.py",
+      "imported_by": 1,
+      "language": "python"
+    },
+    {
+      "file": "src/billing/PaymentController.java",
+      "imported_by": 1,
+      "language": "java"
+    },
+    {
+      "file": "src/checkout/service.py",
+      "imported_by": 1,
+      "language": "python"
+    },
+    {
+      "file": "src/frontend/apiClient.js",
+      "imported_by": 1,
+      "language": "javascript"
+    }
+  ]
+}

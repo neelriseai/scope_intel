@@ -1,0 +1,162 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:04:20+00:00",
+  "features": [
+    {
+      "id": "auth",
+      "aliases": [
+        "auth"
+      ],
+      "owned_packages": [
+        "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.auth",
+        "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.tests.auth"
+      ],
+      "key_files": [
+        "src/auth/__init__.py",
+        "src/auth/login.py",
+        "src/auth/session.py",
+        "tests/auth/test_login.py"
+      ],
+      "entry_points": [
+        "src/auth/login.py::handle_login",
+        "src/auth/login.py::handle_logout"
+      ],
+      "depends_on_features": [
+        "users"
+      ],
+      "related_tests": [
+        "tests/auth/test_login.py",
+        "tests/e2e/login.spec.ts"
+      ],
+      "languages": [
+        "python"
+      ],
+      "file_count": 4,
+      "symbol_count": 11
+    },
+    {
+      "id": "billing",
+      "aliases": [
+        "billing"
+      ],
+      "owned_packages": [
+        "src.billing",
+        "tests.billing"
+      ],
+      "key_files": [
+        "src/billing/PaymentController.java",
+        "src/billing/PaymentService.java",
+        "tests/billing/PaymentControllerTest.java"
+      ],
+      "entry_points": [
+        "src/billing/PaymentController.java::src.billing.PaymentController.PaymentController",
+        "src/billing/PaymentController.java::src.billing.PaymentController.handleCharge",
+        "src/billing/PaymentController.java::src.billing.PaymentController.handleRefund"
+      ],
+      "depends_on_features": [],
+      "related_tests": [
+        "tests/billing/PaymentControllerTest.java"
+      ],
+      "languages": [
+        "java"
+      ],
+      "file_count": 3,
+      "symbol_count": 10
+    },
+    {
+      "id": "checkout",
+      "aliases": [
+        "checkout"
+      ],
+      "owned_packages": [
+        "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.checkout",
+        "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.tests.checkout"
+      ],
+      "key_files": [
+        "src/checkout/__init__.py",
+        "src/checkout/cart.py",
+        "src/checkout/service.py",
+        "tests/checkout/test_service.py"
+      ],
+      "entry_points": [
+        "src/checkout/service.py::run_checkout"
+      ],
+      "depends_on_features": [
+        "auth",
+        "users"
+      ],
+      "related_tests": [
+        "tests/checkout/test_service.py"
+      ],
+      "languages": [
+        "python"
+      ],
+      "file_count": 4,
+      "symbol_count": 7
+    },
+    {
+      "id": "e2e",
+      "aliases": [
+        "e2e"
+      ],
+      "owned_packages": [
+        "e2e"
+      ],
+      "key_files": [
+        "tests/e2e/login.spec.ts"
+      ],
+      "entry_points": [],
+      "depends_on_features": [],
+      "related_tests": [
+        "tests/e2e/login.spec.ts"
+      ],
+      "languages": [
+        "playwright"
+      ],
+      "file_count": 1,
+      "symbol_count": 0
+    },
+    {
+      "id": "frontend",
+      "aliases": [
+        "frontend"
+      ],
+      "owned_packages": [
+        "frontend"
+      ],
+      "key_files": [
+        "src/frontend/apiClient.js",
+        "src/frontend/loginForm.js"
+      ],
+      "entry_points": [],
+      "depends_on_features": [],
+      "related_tests": [],
+      "languages": [
+        "javascript"
+      ],
+      "file_count": 2,
+      "symbol_count": 4
+    },
+    {
+      "id": "users",
+      "aliases": [
+        "users"
+      ],
+      "owned_packages": [
+        "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.users"
+      ],
+      "key_files": [
+        "src/users/__init__.py",
+        "src/users/repository.py"
+      ],
+      "entry_points": [],
+      "depends_on_features": [],
+      "related_tests": [],
+      "languages": [
+        "python"
+      ],
+      "file_count": 2,
+      "symbol_count": 2
+    }
+  ]
+}

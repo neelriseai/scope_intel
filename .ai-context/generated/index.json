@@ -1,0 +1,89 @@
+{
+  "project": "Generic Intelligence Strategy — Deterministic AI Context + Scope System",
+  "version": "1.2.0",
+  "last_updated": "2026-04-27T00:00:00+05:30",
+  "description": "Two-layer system: (1) .ai-context/ serves architectural docs via MCP; (2) scope-intelligence-toolkit/ indexes code scope per-repo. Together they eliminate repo-wide scanning by AI assistants.",
+  "layers": {
+    "context_docs": {
+      "path": ".ai-context/",
+      "server": ".ai-context/server.py",
+      "description": "Project knowledge base: architecture, constraints, playbooks, current phase."
+    },
+    "code_scope": {
+      "toolkit": "scope-intelligence-toolkit/",
+      "per_repo_index": ".scope-intelligence/",
+      "cli": "python -m scope_intel",
+      "description": "Per-repo code index: features, symbols, dependencies, tests, touchpoints, call graph."
+    }
+  },
+  "structure": {
+    "generated": [
+      {
+        "file": "001-project-overview.md",
+        "purpose": "Defines the core idea, goals, and benefits of the deterministic token-saving system."
+      },
+      {
+        "file": "002-system-architecture.md",
+        "purpose": "Outlines the layered architecture: instructions, scope index, update engine, retrieval interface, and execution layer."
+      },
+      {
+        "file": "003-deterministic-engine.md",
+        "purpose": "Details deterministic update engine modes, hook strategies, and automation principles."
+      },
+      {
+        "file": "004-rag-layer.md",
+        "purpose": "Describes retrieval API design, compact query outputs, and subagent exploration strategy."
+      },
+      {
+        "file": "005-memory-layer.md",
+        "purpose": "Explains global vs repo memory, long-term memory strategy, and token-efficiency rules."
+      },
+      {
+        "file": "006-validation-engine.md",
+        "purpose": "Defines validation workflows for debugging and enhancement, including risk analysis."
+      },
+      {
+        "file": "007-skill-playbooks.md",
+        "purpose": "Documents reusable skills: /debug-feature, /enhance-feature, /impact-analysis, /update-scope."
+      },
+      {
+        "file": "008-subagent-strategy.md",
+        "purpose": "Outlines subagent roles: Explore, Plan, Main Agent, Validation Helper."
+      },
+      {
+        "file": "009-schema-design.md",
+        "purpose": "Provides schema examples for feature maps and symbol-level dependency narrowing."
+      },
+      {
+        "file": "claude-code-integration.md",
+        "purpose": "Detailed wiring guide for Claude Code: CLAUDE.md rules, hook configs, sample skill, verification steps."
+      },
+      {
+        "file": "roadmap.md",
+        "purpose": "Phased implementation plan (Phase 1–4), deliverables, and guiding principles."
+      },
+      {
+        "file": "mcp-contract.md",
+        "purpose": "Defines MCP query contract methods for deterministic retrieval of context slices."
+      }
+    ],
+    "curated": [
+      {
+        "file": "current phase.md",
+        "purpose": "Tracks phased implementation strategy and minimum viable deliverables."
+      },
+      {
+        "file": "constraints.md",
+        "purpose": "Lists constraints and rules to avoid token bloat and inefficiency."
+      },
+      {
+        "file": "module-map.md",
+        "purpose": "Maps toolkit modules, repo-local scope files, and supporting tools."
+      }
+    ],
+    "readme": {
+      "file": "README.md",
+      "purpose": "Explains the purpose of the .ai-context/ folder, usage guidelines, and extensibility notes."
+    }
+  }
+}

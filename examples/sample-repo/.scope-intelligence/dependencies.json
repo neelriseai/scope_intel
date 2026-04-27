@@ -1,0 +1,119 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:20:30+00:00",
+  "files": {
+    "tests/test_auth.py": {
+      "language": "python",
+      "feature": "tests",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.sample-repo.tests",
+      "hash": "e773ccd968bfa679",
+      "imports_raw": [
+        "pytest",
+        "src.auth.login"
+      ],
+      "imports": [
+        "src/auth/login.py"
+      ],
+      "imported_by": [],
+      "symbols": [
+        "test_issue_token_returns_hex",
+        "test_validate_token_accepts_valid",
+        "test_validate_token_rejects_short"
+      ],
+      "loc": 20
+    },
+    "tests/test_billing.py": {
+      "language": "python",
+      "feature": "tests",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.sample-repo.tests",
+      "hash": "5d8c5f14399d4a91",
+      "imports_raw": [
+        "pytest",
+        "src.billing.payment",
+        "src.auth.login"
+      ],
+      "imports": [
+        "src/billing/payment.py",
+        "src/auth/login.py"
+      ],
+      "imported_by": [],
+      "symbols": [
+        "svc",
+        "test_charge_valid",
+        "test_charge_exceeds_limit",
+        "test_refund"
+      ],
+      "loc": 29
+    },
+    "src/auth/login.py": {
+      "language": "python",
+      "feature": "auth",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.sample-repo.src.auth",
+      "hash": "64c32d03c1a6f9ea",
+      "imports_raw": [
+        "os",
+        "datetime",
+        "fastapi",
+        "hashlib"
+      ],
+      "imports": [],
+      "imported_by": [
+        "src/billing/payment.py",
+        "tests/test_auth.py",
+        "tests/test_billing.py"
+      ],
+      "symbols": [
+        "UserSession",
+        "__init__",
+        "login",
+        "_issue_token",
+        "validate_token"
+      ],
+      "loc": 33
+    },
+    "src/billing/payment.py": {
+      "language": "python",
+      "feature": "billing",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.sample-repo.src.billing",
+      "hash": "24cf53f83b41a5ce",
+      "imports_raw": [
+        "os",
+        "src.auth.login"
+      ],
+      "imports": [
+        "src/auth/login.py"
+      ],
+      "imported_by": [
+        "tests/test_billing.py"
+      ],
+      "symbols": [
+        "PaymentService",
+        "charge",
+        "refund",
+        "get_payment_service"
+      ],
+      "loc": 26
+    },
+    "src/frontend/api_client.py": {
+      "language": "python",
+      "feature": "frontend",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.sample-repo.src.frontend",
+      "hash": "e7a12b7c0534c720",
+      "imports_raw": [
+        "os",
+        "urllib.request",
+        "json",
+        "urllib.request",
+        "json"
+      ],
+      "imports": [],
+      "imported_by": [],
+      "symbols": [
+        "post_login",
+        "post_charge"
+      ],
+      "loc": 24
+    }
+  },
+  "external": {}
+}

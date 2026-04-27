@@ -1,0 +1,11 @@
+{
+  "name": "sample-repo-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "react": "^18.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}

@@ -1,0 +1,160 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "AI Context MCP Contract",
+    "version": "1.1.0",
+    "description": "Deterministic retrieval API for .ai-context files to minimize token consumption."
+  },
+  "paths": {
+    "/list_context_files": {
+      "get": {
+        "summary": "List all context files",
+        "responses": {
+          "200": {
+            "description": "Manifest of available files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "name": { "type": "string" },
+                          "category": { "type": "string" },
+                          "purpose": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_context_file/{file_id}": {
+      "get": {
+        "summary": "Retrieve full content of a context file",
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "file_id": { "type": "string" }, "content": { "type": "string" } } } } }
+          }
+        }
+      }
+    },
+    "/get_context_slice": {
+      "get": {
+        "summary": "Retrieve compact slice relevant to a query",
+        "parameters": [
+          { "name": "query", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching sections",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "query": { "type": "string" }, "matches": { "type": "array", "items": { "type": "object", "properties": { "file_id": { "type": "string" }, "section": { "type": "string" }, "content": { "type": "string" } } } } } } } }
+          }
+        }
+      }
+    },
+    "/get_phase_status": {
+      "get": {
+        "summary": "Return current implementation phase",
+        "responses": {
+          "200": {
+            "description": "Phase + deliverables",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "phase": { "type": "string" }, "deliverables": { "type": "array", "items": { "type": "string" } } } } } }
+          }
+        }
+      }
+    },
+    "/get_constraints": {
+      "get": {
+        "summary": "Return token-efficiency constraints",
+        "responses": {
+          "200": {
+            "description": "Constraints list",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "constraints": { "type": "array", "items": { "type": "string" } } } } } }
+          }
+        }
+      }
+    },
+    "/get_module_map": {
+      "get": {
+        "summary": "Return toolkit + repo-local module map",
+        "responses": {
+          "200": {
+            "description": "Module map",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "toolkit_modules": { "type": "array", "items": { "type": "string" } }, "repo_scope_files": { "type": "array", "items": { "type": "string" } }, "tools": { "type": "array", "items": { "type": "string" } } } } } }
+          }
+        }
+      }
+    },
+    "/get_skill_playbook/{skill_id}": {
+      "get": {
+        "summary": "Retrieve skill playbook",
+        "parameters": [
+          { "name": "skill_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill workflow",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "skill_id": { "type": "string" }, "content": { "type": "string" } } } } }
+          }
+        }
+      }
+    },
+    "/get_subagent_strategy": {
+      "get": {
+        "summary": "Retrieve subagent strategy",
+        "responses": {
+          "200": {
+            "description": "Subagent roles",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "content": { "type": "string" } } } } }
+          }
+        }
+      }
+    },
+    "/get_schema_design": {
+      "get": {
+        "summary": "Retrieve schema design",
+        "responses": {
+          "200": {
+            "description": "Feature-map + symbol schema",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "content": { "type": "string" } } } } }
+          }
+        }
+      }
+    },
+    "/get_claude_integration": {
+      "get": {
+        "summary": "Retrieve Claude Code integration guide",
+        "responses": {
+          "200": {
+            "description": "Integration details",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "content": { "type": "string" } } } } }
+          }
+        }
+      }
+    },
+    "/get_roadmap": {
+      "get": {
+        "summary": "Retrieve roadmap",
+        "responses": {
+          "200": {
+            "description": "Phased plan",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "content": { "type": "string" } } } } }
+          }
+        }
+      }
+    }
+  }
+}

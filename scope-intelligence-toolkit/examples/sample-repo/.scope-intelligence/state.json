@@ -1,0 +1,73 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:04:20+00:00",
+  "file_count": 17,
+  "symbol_count": 34,
+  "test_count": 4,
+  "feature_count": 6,
+  "impact_cache": {
+    "src/auth/login.py": [
+      "tests/auth/test_login.py"
+    ],
+    "src/auth/session.py": [
+      "src/auth/login.py",
+      "src/checkout/service.py",
+      "tests/auth/test_login.py",
+      "tests/checkout/test_service.py"
+    ],
+    "src/billing/PaymentController.java": [
+      "tests/billing/PaymentControllerTest.java"
+    ],
+    "src/billing/PaymentService.java": [
+      "src/billing/PaymentController.java",
+      "tests/billing/PaymentControllerTest.java"
+    ],
+    "src/checkout/cart.py": [
+      "src/checkout/service.py",
+      "tests/checkout/test_service.py"
+    ],
+    "src/checkout/service.py": [
+      "tests/checkout/test_service.py"
+    ],
+    "src/frontend/apiClient.js": [
+      "src/frontend/loginForm.js"
+    ],
+    "src/users/repository.py": [
+      "src/auth/login.py",
+      "src/checkout/cart.py",
+      "tests/auth/test_login.py",
+      "src/checkout/service.py",
+      "tests/checkout/test_service.py"
+    ]
+  },
+  "config_snapshot": {
+    "version": "1.0",
+    "ignore_globs": [
+      ".git/**",
+      "node_modules/**",
+      "venv/**",
+      ".venv/**",
+      "__pycache__/**",
+      "dist/**",
+      "build/**",
+      "target/**",
+      "out/**",
+      ".scope-intelligence/**",
+      ".idea/**",
+      ".vscode/**",
+      "*.min.js",
+      "*.lock"
+    ],
+    "feature_roots": [
+      "src",
+      "app",
+      "lib",
+      "packages",
+      "modules",
+      "services"
+    ],
+    "feature_overrides": {},
+    "aliases": {},
+    "max_file_size_kb": 512
+  }
+}

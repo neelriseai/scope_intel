@@ -1,0 +1,320 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:04:20+00:00",
+  "files": {
+    "src/__init__.py": {
+      "language": "python",
+      "feature": null,
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src",
+      "hash": "da39a3ee5e6b4b0d",
+      "imports_raw": [],
+      "imports": [],
+      "imported_by": [],
+      "symbols": [],
+      "loc": 1
+    },
+    "tests/auth/test_login.py": {
+      "language": "python",
+      "feature": "auth",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.tests.auth",
+      "hash": "daada88355458983",
+      "imports_raw": [
+        "src.auth.login",
+        "pytest"
+      ],
+      "imports": [
+        "src/auth/login.py"
+      ],
+      "imported_by": [],
+      "symbols": [
+        "test_login_succeeds_for_known_user",
+        "test_login_rejects_unknown_email"
+      ],
+      "loc": 13
+    },
+    "tests/billing/PaymentControllerTest.java": {
+      "language": "java",
+      "feature": "billing",
+      "package": "tests.billing",
+      "hash": "3efe858123a04621",
+      "imports_raw": [
+        "org.junit.jupiter.api.Test",
+        "src.billing.PaymentController",
+        "src.billing.PaymentService"
+      ],
+      "imports": [
+        "src/billing/PaymentController.java",
+        "src/billing/PaymentService.java"
+      ],
+      "imported_by": [],
+      "symbols": [
+        "PaymentControllerTest",
+        "chargeReturnsOkForSmallAmounts",
+        "chargeRejectsNegativeAmounts"
+      ],
+      "loc": 23
+    },
+    "tests/checkout/test_service.py": {
+      "language": "python",
+      "feature": "checkout",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.tests.checkout",
+      "hash": "1c466424dc37bf16",
+      "imports_raw": [
+        "src.checkout.service",
+        "src.checkout.cart"
+      ],
+      "imports": [
+        "src/checkout/service.py",
+        "src/checkout/cart.py"
+      ],
+      "imported_by": [],
+      "symbols": [
+        "test_checkout_requires_auth",
+        "test_checkout_rejects_empty_cart"
+      ],
+      "loc": 13
+    },
+    "tests/e2e/login.spec.ts": {
+      "language": "playwright",
+      "feature": "e2e",
+      "package": null,
+      "hash": "244891526ae79cfa",
+      "imports_raw": [
+        "@playwright/test"
+      ],
+      "imports": [],
+      "imported_by": [],
+      "symbols": [],
+      "loc": 17
+    },
+    "src/auth/login.py": {
+      "language": "python",
+      "feature": "auth",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.auth",
+      "hash": "44923b35d90798fc",
+      "imports_raw": [
+        "os",
+        "src.auth.session",
+        "src.users.repository",
+        "hashlib"
+      ],
+      "imports": [
+        "src/auth/session.py",
+        "src/users/repository.py"
+      ],
+      "imported_by": [
+        "tests/auth/test_login.py"
+      ],
+      "symbols": [
+        "LoginError",
+        "_Router",
+        "post",
+        "handle_login",
+        "handle_logout",
+        "_check_password",
+        "_hash"
+      ],
+      "loc": 47
+    },
+    "src/auth/session.py": {
+      "language": "python",
+      "feature": "auth",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.auth",
+      "hash": "d1ad4340a119cb58",
+      "imports_raw": [
+        "secrets"
+      ],
+      "imports": [],
+      "imported_by": [
+        "src/auth/login.py",
+        "src/checkout/service.py"
+      ],
+      "symbols": [
+        "create_session",
+        "get_user_for_token"
+      ],
+      "loc": 15
+    },
+    "src/auth/__init__.py": {
+      "language": "python",
+      "feature": "auth",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.auth",
+      "hash": "da39a3ee5e6b4b0d",
+      "imports_raw": [],
+      "imports": [],
+      "imported_by": [],
+      "symbols": [],
+      "loc": 1
+    },
+    "src/billing/PaymentController.java": {
+      "language": "java",
+      "feature": "billing",
+      "package": "src.billing",
+      "hash": "41f29cb2f520ffea",
+      "imports_raw": [
+        "org.springframework.web.bind.annotation.PostMapping",
+        "org.springframework.web.bind.annotation.RequestMapping",
+        "org.springframework.beans.factory.annotation.Value",
+        "src.billing.PaymentService"
+      ],
+      "imports": [
+        "src/billing/PaymentService.java"
+      ],
+      "imported_by": [
+        "tests/billing/PaymentControllerTest.java"
+      ],
+      "symbols": [
+        "PaymentController",
+        "PaymentController",
+        "handleCharge",
+        "handleRefund"
+      ],
+      "loc": 38
+    },
+    "src/billing/PaymentService.java": {
+      "language": "java",
+      "feature": "billing",
+      "package": "src.billing",
+      "hash": "4e323ee8646ba560",
+      "imports_raw": [],
+      "imports": [],
+      "imported_by": [
+        "src/billing/PaymentController.java",
+        "tests/billing/PaymentControllerTest.java"
+      ],
+      "symbols": [
+        "PaymentService",
+        "charge",
+        "refund"
+      ],
+      "loc": 13
+    },
+    "src/checkout/cart.py": {
+      "language": "python",
+      "feature": "checkout",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.checkout",
+      "hash": "172f94305469a480",
+      "imports_raw": [
+        "src.users.repository"
+      ],
+      "imports": [
+        "src/users/repository.py"
+      ],
+      "imported_by": [
+        "src/checkout/service.py",
+        "tests/checkout/test_service.py"
+      ],
+      "symbols": [
+        "Cart",
+        "__init__",
+        "add",
+        "total"
+      ],
+      "loc": 15
+    },
+    "src/checkout/service.py": {
+      "language": "python",
+      "feature": "checkout",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.checkout",
+      "hash": "a1a5797ff5f9baec",
+      "imports_raw": [
+        "src.checkout.cart",
+        "src.auth.session"
+      ],
+      "imports": [
+        "src/checkout/cart.py",
+        "src/auth/session.py"
+      ],
+      "imported_by": [
+        "tests/checkout/test_service.py"
+      ],
+      "symbols": [
+        "run_checkout"
+      ],
+      "loc": 13
+    },
+    "src/checkout/__init__.py": {
+      "language": "python",
+      "feature": "checkout",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.checkout",
+      "hash": "da39a3ee5e6b4b0d",
+      "imports_raw": [],
+      "imports": [],
+      "imported_by": [],
+      "symbols": [],
+      "loc": 1
+    },
+    "src/frontend/apiClient.js": {
+      "language": "javascript",
+      "feature": "frontend",
+      "package": null,
+      "hash": "06bd057b4301e5df",
+      "imports_raw": [],
+      "imports": [],
+      "imported_by": [
+        "src/frontend/loginForm.js"
+      ],
+      "symbols": [
+        "postJson",
+        "getJson"
+      ],
+      "loc": 17
+    },
+    "src/frontend/loginForm.js": {
+      "language": "javascript",
+      "feature": "frontend",
+      "package": null,
+      "hash": "3b398a788fcce4cf",
+      "imports_raw": [
+        "./apiClient.js"
+      ],
+      "imports": [
+        "src/frontend/apiClient.js"
+      ],
+      "imported_by": [],
+      "symbols": [
+        "LoginForm",
+        "renderLoginForm"
+      ],
+      "loc": 16
+    },
+    "src/users/repository.py": {
+      "language": "python",
+      "feature": "users",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.users",
+      "hash": "fc30f4842bb40e14",
+      "imports_raw": [],
+      "imports": [],
+      "imported_by": [
+        "src/auth/login.py",
+        "src/checkout/cart.py"
+      ],
+      "symbols": [
+        "find_user_by_email",
+        "list_users"
+      ],
+      "loc": 15
+    },
+    "src/users/__init__.py": {
+      "language": "python",
+      "feature": "users",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.users",
+      "hash": "da39a3ee5e6b4b0d",
+      "imports_raw": [],
+      "imports": [],
+      "imported_by": [],
+      "symbols": [],
+      "loc": 1
+    }
+  },
+  "external": {
+    "python": [
+      "pytest>=7.0",
+      "flask>=2.0"
+    ],
+    "javascript": [
+      "react@^18.0.0",
+      "@playwright/test@^1.40.0"
+    ]
+  }
+}

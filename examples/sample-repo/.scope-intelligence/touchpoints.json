@@ -1,0 +1,122 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:20:30+00:00",
+  "by_file": {
+    "src/auth/login.py": {
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/login",
+          "handler": "login",
+          "framework": "flask",
+          "line": 19
+        }
+      ],
+      "configs": [
+        {
+          "name": "TOKEN_TTL_SECONDS",
+          "default": "\"3600\"",
+          "line": 9
+        },
+        {
+          "name": "AUTH_SECRET",
+          "default": "\"dev-secret\"",
+          "line": 10
+        }
+      ],
+      "db_models": [],
+      "events": []
+    },
+    "src/billing/payment.py": {
+      "routes": [],
+      "configs": [
+        {
+          "name": "PAYMENT_TIMEOUT_MS",
+          "default": "\"5000\"",
+          "line": 6
+        },
+        {
+          "name": "PAYMENT_MAX_AMOUNT",
+          "default": "\"10000\"",
+          "line": 7
+        }
+      ],
+      "db_models": [],
+      "events": []
+    },
+    "src/frontend/api_client.py": {
+      "routes": [],
+      "configs": [
+        {
+          "name": "API_BASE",
+          "default": "\"http://localhost:8000\"",
+          "line": 4
+        },
+        {
+          "name": "API_TIMEOUT_MS",
+          "default": "\"3000\"",
+          "line": 5
+        }
+      ],
+      "db_models": [],
+      "events": []
+    }
+  },
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/login",
+      "handler": "login",
+      "framework": "flask",
+      "line": 19,
+      "file": "src/auth/login.py",
+      "feature": "auth"
+    }
+  ],
+  "configs": [
+    {
+      "name": "TOKEN_TTL_SECONDS",
+      "default": "\"3600\"",
+      "line": 9,
+      "file": "src/auth/login.py",
+      "feature": "auth"
+    },
+    {
+      "name": "AUTH_SECRET",
+      "default": "\"dev-secret\"",
+      "line": 10,
+      "file": "src/auth/login.py",
+      "feature": "auth"
+    },
+    {
+      "name": "PAYMENT_TIMEOUT_MS",
+      "default": "\"5000\"",
+      "line": 6,
+      "file": "src/billing/payment.py",
+      "feature": "billing"
+    },
+    {
+      "name": "PAYMENT_MAX_AMOUNT",
+      "default": "\"10000\"",
+      "line": 7,
+      "file": "src/billing/payment.py",
+      "feature": "billing"
+    },
+    {
+      "name": "API_BASE",
+      "default": "\"http://localhost:8000\"",
+      "line": 4,
+      "file": "src/frontend/api_client.py",
+      "feature": "frontend"
+    },
+    {
+      "name": "API_TIMEOUT_MS",
+      "default": "\"3000\"",
+      "line": 5,
+      "file": "src/frontend/api_client.py",
+      "feature": "frontend"
+    }
+  ],
+  "db_models": [],
+  "events": []
+}

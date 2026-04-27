@@ -1,0 +1,187 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:04:20+00:00",
+  "by_file": {
+    "src/auth/login.py": {
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/api/login",
+          "handler": "handle_login",
+          "framework": "flask",
+          "line": 24
+        },
+        {
+          "method": "POST",
+          "path": "/api/logout",
+          "handler": "handle_logout",
+          "framework": "flask",
+          "line": 35
+        }
+      ],
+      "configs": [
+        {
+          "name": "AUTH_SECRET",
+          "default": "\"dev-secret\"",
+          "line": 8
+        },
+        {
+          "name": "TOKEN_TTL_SECONDS",
+          "default": "\"3600\"",
+          "line": 9
+        }
+      ],
+      "db_models": [],
+      "events": []
+    },
+    "src/billing/PaymentController.java": {
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/billing",
+          "handler": "src.billing.PaymentController.PaymentController",
+          "framework": "spring",
+          "line": 8
+        },
+        {
+          "method": "POST",
+          "path": "/charge",
+          "handler": "src.billing.PaymentController.handleCharge",
+          "framework": "spring",
+          "line": 23
+        },
+        {
+          "method": "POST",
+          "path": "/refund",
+          "handler": "src.billing.PaymentController.handleRefund",
+          "framework": "spring",
+          "line": 32
+        }
+      ],
+      "configs": [
+        {
+          "name": "payment.timeout.ms",
+          "default": "5000",
+          "line": 13
+        },
+        {
+          "name": "payment.max.amount",
+          "default": "10000",
+          "line": 16
+        }
+      ],
+      "db_models": [],
+      "events": []
+    },
+    "src/frontend/apiClient.js": {
+      "routes": [],
+      "configs": [
+        {
+          "name": "API_BASE",
+          "default": null,
+          "line": 1
+        },
+        {
+          "name": "API_TIMEOUT_MS",
+          "default": null,
+          "line": 2
+        }
+      ],
+      "db_models": [],
+      "events": []
+    }
+  },
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/login",
+      "handler": "handle_login",
+      "framework": "flask",
+      "line": 24,
+      "file": "src/auth/login.py",
+      "feature": "auth"
+    },
+    {
+      "method": "POST",
+      "path": "/api/logout",
+      "handler": "handle_logout",
+      "framework": "flask",
+      "line": 35,
+      "file": "src/auth/login.py",
+      "feature": "auth"
+    },
+    {
+      "method": "GET",
+      "path": "/api/billing",
+      "handler": "src.billing.PaymentController.PaymentController",
+      "framework": "spring",
+      "line": 8,
+      "file": "src/billing/PaymentController.java",
+      "feature": "billing"
+    },
+    {
+      "method": "POST",
+      "path": "/charge",
+      "handler": "src.billing.PaymentController.handleCharge",
+      "framework": "spring",
+      "line": 23,
+      "file": "src/billing/PaymentController.java",
+      "feature": "billing"
+    },
+    {
+      "method": "POST",
+      "path": "/refund",
+      "handler": "src.billing.PaymentController.handleRefund",
+      "framework": "spring",
+      "line": 32,
+      "file": "src/billing/PaymentController.java",
+      "feature": "billing"
+    }
+  ],
+  "configs": [
+    {
+      "name": "AUTH_SECRET",
+      "default": "\"dev-secret\"",
+      "line": 8,
+      "file": "src/auth/login.py",
+      "feature": "auth"
+    },
+    {
+      "name": "TOKEN_TTL_SECONDS",
+      "default": "\"3600\"",
+      "line": 9,
+      "file": "src/auth/login.py",
+      "feature": "auth"
+    },
+    {
+      "name": "payment.timeout.ms",
+      "default": "5000",
+      "line": 13,
+      "file": "src/billing/PaymentController.java",
+      "feature": "billing"
+    },
+    {
+      "name": "payment.max.amount",
+      "default": "10000",
+      "line": 16,
+      "file": "src/billing/PaymentController.java",
+      "feature": "billing"
+    },
+    {
+      "name": "API_BASE",
+      "default": null,
+      "line": 1,
+      "file": "src/frontend/apiClient.js",
+      "feature": "frontend"
+    },
+    {
+      "name": "API_TIMEOUT_MS",
+      "default": null,
+      "line": 2,
+      "file": "src/frontend/apiClient.js",
+      "feature": "frontend"
+    }
+  ],
+  "db_models": [],
+  "events": []
+}
