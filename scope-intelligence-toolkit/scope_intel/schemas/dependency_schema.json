@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DependencyIndex",
+  "description": "Per-file dependency edges plus repo-level package dependencies (e.g. pip, npm, maven).",
+  "type": "object",
+  "required": ["version", "generated_at", "files", "external"],
+  "properties": {
+    "version": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "files": {
+      "type": "object",
+      "description": "Map keyed by relative file path.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "language": { "type": "string" },
+          "feature": { "type": "string" },
+          "package": { "type": "string" },
+          "hash": { "type": "string" },
+          "imports": { "type": "array", "items": { "type": "string" }, "description": "Resolved internal file paths this file depends on." },
+          "imports_raw": { "type": "array", "items": { "type": "string" }, "description": "Raw import strings (module/symbol names) before resolution." },
+          "imported_by": { "type": "array", "items": { "type": "string" }, "description": "Reverse-edge list of internal files that import this one." },
+          "symbols": { "type": "array", "items": { "type": "string" } },
+          "loc": { "type": "integer" }
+        }
+      }
+    },
+    "external": {
+      "type": "object",
+      "description": "Per-language declared external dependencies (pip, npm, maven, etc).",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}

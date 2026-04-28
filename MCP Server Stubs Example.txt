@@ -1,0 +1,85 @@
+1. Wiring the MCP Contract into the Retrieval Interface
+The retrieval interface is the bridge between your .ai-context/ files and assistants like Claude/Cursor. Instead of assistants reading raw .md files, they call MCP methods that return compact slices. Here’s how to wire it:
+
+Retrieval Flow
+Assistant starts session → calls list_context_files()
+
+Gets a manifest of all .md files with IDs and purposes (from index.json).
+
+Assistant narrows query → calls get_context_slice(query)
+
+Example: "debug flow" returns only the Debug Flow section from 006-validation-engine.md.
+
+Assistant needs deeper context → calls get_context_file(file_id)
+
+Example: "002" returns full content of 002-system-architecture.md.
+
+Assistant checks project status → calls get_phase_status()
+
+Returns current phase + deliverables (from curated/current-phase.md).
+
+Assistant enforces constraints → calls get_constraints()
+
+Returns token-efficiency rules (from curated/constraints.md).
+
+Assistant maps modules → calls get_module_map()
+
+Returns toolkit + repo-local scope files (from curated/module-map.md).
+
+Implementation Stub (Python + FastAPI)
+Here’s a minimal MCP server stub:
+
+
+from fastapi import FastAPI
+import json
+
+app = FastAPI()
+
+# Load manifest
+with open(".ai-context/generated/index.json") as f:
+    manifest = json.load(f)
+
+@app.get("/list_context_files")
+def list_context_files():
+    return manifest["structure"]
+
+@app.get("/get_context_file/{file_id}")
+def get_context_file(file_id: str):
+    # Map file_id to filename
+    mapping = {f["file"].split("-")[0]: f["file"] for f in manifest["structure"]["generated"]}
+    filename = mapping.get(file_id)
+    if not filename:
+        return {"error": "File not found"}
+    with open(f".ai-context/generated/{filename}") as f:
+        return {"file_id": file_id, "content": f.read()}
+
+@app.get("/get_context_slice")
+def get_context_slice(query: str):
+    # Simplified: search all files for query
+    results = []
+    for fmeta in manifest["structure"]["generated"]:
+        with open(f".ai-context/generated/{fmeta['file']}") as f:
+            content = f.read()
+            if query.lower() in content.lower():
+                results.append({"file_id": fmeta["file"], "content": content})
+    return {"query": query, "matches": results}
+
+@app.get("/get_phase_status")
+def get_phase_status():
+    with open(".ai-context/curated/current-phase.md") as f:
+        return {"phase_status": f.read()}
+
+@app.get("/get_constraints")
+def get_constraints():
+    with open(".ai-context/curated/constraints.md") as f:
+        return {"constraints": f.read()}
+
+@app.get("/get_module_map")
+def get_module_map():
+    with open(".ai-context/curated/module-map.md") as f:
+        return {"module_map": f.read()}
+
+
+
+This stub wires your MCP contract directly into the retrieval interface
+

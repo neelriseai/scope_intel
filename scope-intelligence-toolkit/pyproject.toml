@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scope-intelligence-toolkit"
+version = "0.1.0"
+description = "Generic, language-adapter-based scope intelligence index for any code repository. Phase 1: CLI only."
+requires-python = ">=3.9"
+authors = [{ name = "Scope Intelligence Toolkit" }]
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+scope = "scope_intel.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scope_intel*"]
+
+[tool.setuptools.package-data]
+"scope_intel.schemas" = ["*.json"]
+"scope_intel.templates" = ["*.md"]

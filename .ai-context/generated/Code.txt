@@ -1,0 +1,20 @@
+
+---
+
+## 📂 `.ai-context/curated/`
+
+### `current-phase.md`
+```markdown
+# Current Phase
+
+- Phase 1: Build CLI + per-repo `.scope-intelligence`.
+- Phase 2: Add Claude instruction to consult scope.
+- Phase 3: Add MCP wrapper.
+- Phase 4: Add long-term memory.
+
+## Minimum Viable Deliverable
+- CLAUDE.md
+- 3 feature maps
+- Retrieval + updater scripts
+- Debug + impact-analysis skills
+- Post-edit hook

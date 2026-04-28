@@ -1,0 +1,95 @@
+{
+  "repo_root": "C:\\Users\\neela\\Documents\\Generic Intelligence Stratgy\\examples\\sample-repo",
+  "totals": {
+    "files": 5,
+    "symbols": 18,
+    "tests": 2,
+    "features": 4
+  },
+  "languages": {
+    "python": 5
+  },
+  "test_frameworks": {
+    "pytest": 2
+  },
+  "test_languages": {
+    "python": 2
+  },
+  "top_features": [
+    {
+      "id": "tests",
+      "files": 2,
+      "symbols": 7,
+      "languages": [
+        "python"
+      ],
+      "tests": 2
+    },
+    {
+      "id": "auth",
+      "files": 1,
+      "symbols": 5,
+      "languages": [
+        "python"
+      ],
+      "tests": 2
+    },
+    {
+      "id": "billing",
+      "files": 1,
+      "symbols": 4,
+      "languages": [
+        "python"
+      ],
+      "tests": 1
+    },
+    {
+      "id": "frontend",
+      "files": 1,
+      "symbols": 2,
+      "languages": [
+        "python"
+      ],
+      "tests": 0
+    }
+  ],
+  "largest_files": [
+    {
+      "file": "src/auth/login.py",
+      "loc": 33,
+      "language": "python"
+    },
+    {
+      "file": "tests/test_billing.py",
+      "loc": 29,
+      "language": "python"
+    },
+    {
+      "file": "src/billing/payment.py",
+      "loc": 26,
+      "language": "python"
+    },
+    {
+      "file": "src/frontend/api_client.py",
+      "loc": 24,
+      "language": "python"
+    },
+    {
+      "file": "tests/test_auth.py",
+      "loc": 20,
+      "language": "python"
+    }
+  ],
+  "most_imported_files": [
+    {
+      "file": "src/auth/login.py",
+      "imported_by": 3,
+      "language": "python"
+    },
+    {
+      "file": "src/billing/payment.py",
+      "imported_by": 1,
+      "language": "python"
+    }
+  ]
+}

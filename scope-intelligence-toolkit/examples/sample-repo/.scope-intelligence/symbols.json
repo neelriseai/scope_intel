@@ -1,0 +1,699 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:04:20+00:00",
+  "symbols": [
+    {
+      "id": "tests/auth/test_login.py::test_login_succeeds_for_known_user",
+      "name": "test_login_succeeds_for_known_user",
+      "qualified_name": "test_login_succeeds_for_known_user",
+      "kind": "function",
+      "file": "tests/auth/test_login.py",
+      "line": 5,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "handle_login"
+      ],
+      "params": [],
+      "resolved_calls": [
+        "src/auth/login.py::handle_login"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "tests/auth/test_login.py::test_login_rejects_unknown_email",
+      "name": "test_login_rejects_unknown_email",
+      "qualified_name": "test_login_rejects_unknown_email",
+      "kind": "function",
+      "file": "tests/auth/test_login.py",
+      "line": 10,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "pytest.raises",
+        "handle_login"
+      ],
+      "params": [],
+      "reads": [
+        "pytest.raises"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::handle_login"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "tests/billing/PaymentControllerTest.java::tests.billing.PaymentControllerTest",
+      "name": "PaymentControllerTest",
+      "qualified_name": "tests.billing.PaymentControllerTest",
+      "kind": "class",
+      "file": "tests/billing/PaymentControllerTest.java",
+      "line": 6,
+      "language": "java",
+      "feature": "billing",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "tests/billing/PaymentControllerTest.java::tests.billing.PaymentControllerTest.chargeReturnsOkForSmallAmounts",
+      "name": "chargeReturnsOkForSmallAmounts",
+      "qualified_name": "tests.billing.PaymentControllerTest.chargeReturnsOkForSmallAmounts",
+      "kind": "method",
+      "file": "tests/billing/PaymentControllerTest.java",
+      "line": 10,
+      "language": "java",
+      "feature": "billing",
+      "parent": "tests.billing.PaymentControllerTest",
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "tests/billing/PaymentControllerTest.java::tests.billing.PaymentControllerTest.chargeRejectsNegativeAmounts",
+      "name": "chargeRejectsNegativeAmounts",
+      "qualified_name": "tests.billing.PaymentControllerTest.chargeRejectsNegativeAmounts",
+      "kind": "method",
+      "file": "tests/billing/PaymentControllerTest.java",
+      "line": 17,
+      "language": "java",
+      "feature": "billing",
+      "parent": "tests.billing.PaymentControllerTest",
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "tests/checkout/test_service.py::test_checkout_requires_auth",
+      "name": "test_checkout_requires_auth",
+      "qualified_name": "test_checkout_requires_auth",
+      "kind": "function",
+      "file": "tests/checkout/test_service.py",
+      "line": 5,
+      "language": "python",
+      "feature": "checkout",
+      "parent": null,
+      "calls": [
+        "run_checkout",
+        "Cart"
+      ],
+      "params": [],
+      "resolved_calls": [
+        "src/checkout/cart.py::Cart",
+        "src/checkout/service.py::run_checkout"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "tests/checkout/test_service.py::test_checkout_rejects_empty_cart",
+      "name": "test_checkout_rejects_empty_cart",
+      "qualified_name": "test_checkout_rejects_empty_cart",
+      "kind": "function",
+      "file": "tests/checkout/test_service.py",
+      "line": 11,
+      "language": "python",
+      "feature": "checkout",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/auth/login.py::LoginError",
+      "name": "LoginError",
+      "qualified_name": "LoginError",
+      "kind": "class",
+      "file": "src/auth/login.py",
+      "line": 12,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": [
+        "src/auth/login.py::handle_login"
+      ]
+    },
+    {
+      "id": "src/auth/login.py::_Router",
+      "name": "_Router",
+      "qualified_name": "_Router",
+      "kind": "class",
+      "file": "src/auth/login.py",
+      "line": 17,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/auth/login.py::_Router.post",
+      "name": "post",
+      "qualified_name": "_Router.post",
+      "kind": "method",
+      "file": "src/auth/login.py",
+      "line": 18,
+      "language": "python",
+      "feature": "auth",
+      "parent": "_Router",
+      "calls": [],
+      "params": [
+        "self",
+        "path"
+      ],
+      "resolved_calls": [],
+      "called_by": [
+        "src/auth/login.py::handle_login",
+        "src/auth/login.py::handle_logout"
+      ]
+    },
+    {
+      "id": "src/auth/login.py::handle_login",
+      "name": "handle_login",
+      "qualified_name": "handle_login",
+      "kind": "function",
+      "file": "src/auth/login.py",
+      "line": 25,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "router.post",
+        "find_user_by_email",
+        "create_session",
+        "LoginError",
+        "_check_password"
+      ],
+      "params": [
+        "email",
+        "password"
+      ],
+      "reads": [
+        "router.post"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::LoginError",
+        "src/auth/login.py::_Router.post",
+        "src/auth/login.py::_check_password",
+        "src/auth/session.py::create_session",
+        "src/users/repository.py::find_user_by_email"
+      ],
+      "called_by": [
+        "tests/auth/test_login.py::test_login_rejects_unknown_email",
+        "tests/auth/test_login.py::test_login_succeeds_for_known_user"
+      ]
+    },
+    {
+      "id": "src/auth/login.py::handle_logout",
+      "name": "handle_logout",
+      "qualified_name": "handle_logout",
+      "kind": "function",
+      "file": "src/auth/login.py",
+      "line": 36,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "router.post"
+      ],
+      "params": [
+        "token"
+      ],
+      "reads": [
+        "router.post"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::_Router.post"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "src/auth/login.py::_check_password",
+      "name": "_check_password",
+      "qualified_name": "_check_password",
+      "kind": "function",
+      "file": "src/auth/login.py",
+      "line": 40,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "user.get",
+        "_hash"
+      ],
+      "params": [
+        "user",
+        "password"
+      ],
+      "reads": [
+        "user.get"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::_hash"
+      ],
+      "called_by": [
+        "src/auth/login.py::handle_login"
+      ]
+    },
+    {
+      "id": "src/auth/login.py::_hash",
+      "name": "_hash",
+      "qualified_name": "_hash",
+      "kind": "function",
+      "file": "src/auth/login.py",
+      "line": 44,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "hexdigest",
+        "hashlib.sha256",
+        "value.encode"
+      ],
+      "params": [
+        "value"
+      ],
+      "reads": [
+        "hashlib.sha256",
+        "value.encode"
+      ],
+      "resolved_calls": [],
+      "called_by": [
+        "src/auth/login.py::_check_password"
+      ]
+    },
+    {
+      "id": "src/auth/session.py::create_session",
+      "name": "create_session",
+      "qualified_name": "create_session",
+      "kind": "function",
+      "file": "src/auth/session.py",
+      "line": 7,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "secrets.token_hex"
+      ],
+      "params": [
+        "user_id"
+      ],
+      "reads": [
+        "secrets.token_hex"
+      ],
+      "resolved_calls": [],
+      "called_by": [
+        "src/auth/login.py::handle_login"
+      ]
+    },
+    {
+      "id": "src/auth/session.py::get_user_for_token",
+      "name": "get_user_for_token",
+      "qualified_name": "get_user_for_token",
+      "kind": "function",
+      "file": "src/auth/session.py",
+      "line": 13,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "_SESSIONS.get"
+      ],
+      "params": [
+        "token"
+      ],
+      "reads": [
+        "_SESSIONS.get"
+      ],
+      "resolved_calls": [],
+      "called_by": [
+        "src/checkout/service.py::run_checkout"
+      ]
+    },
+    {
+      "id": "src/billing/PaymentController.java::src.billing.PaymentController",
+      "name": "PaymentController",
+      "qualified_name": "src.billing.PaymentController",
+      "kind": "class",
+      "file": "src/billing/PaymentController.java",
+      "line": 9,
+      "language": "java",
+      "feature": "billing",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/billing/PaymentController.java::src.billing.PaymentController.PaymentController",
+      "name": "PaymentController",
+      "qualified_name": "src.billing.PaymentController.PaymentController",
+      "kind": "method",
+      "file": "src/billing/PaymentController.java",
+      "line": 18,
+      "language": "java",
+      "feature": "billing",
+      "parent": "src.billing.PaymentController",
+      "calls": [],
+      "params": [
+        "service"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/billing/PaymentController.java::src.billing.PaymentController.handleCharge",
+      "name": "handleCharge",
+      "qualified_name": "src.billing.PaymentController.handleCharge",
+      "kind": "method",
+      "file": "src/billing/PaymentController.java",
+      "line": 24,
+      "language": "java",
+      "feature": "billing",
+      "parent": "src.billing.PaymentController",
+      "calls": [],
+      "params": [
+        "userId",
+        "amount"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/billing/PaymentController.java::src.billing.PaymentController.handleRefund",
+      "name": "handleRefund",
+      "qualified_name": "src.billing.PaymentController.handleRefund",
+      "kind": "method",
+      "file": "src/billing/PaymentController.java",
+      "line": 33,
+      "language": "java",
+      "feature": "billing",
+      "parent": "src.billing.PaymentController",
+      "calls": [],
+      "params": [
+        "orderId"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/billing/PaymentService.java::src.billing.PaymentService",
+      "name": "PaymentService",
+      "qualified_name": "src.billing.PaymentService",
+      "kind": "class",
+      "file": "src/billing/PaymentService.java",
+      "line": 2,
+      "language": "java",
+      "feature": "billing",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/billing/PaymentService.java::src.billing.PaymentService.charge",
+      "name": "charge",
+      "qualified_name": "src.billing.PaymentService.charge",
+      "kind": "method",
+      "file": "src/billing/PaymentService.java",
+      "line": 4,
+      "language": "java",
+      "feature": "billing",
+      "parent": "src.billing.PaymentService",
+      "calls": [],
+      "params": [
+        "userId",
+        "amount"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/billing/PaymentService.java::src.billing.PaymentService.refund",
+      "name": "refund",
+      "qualified_name": "src.billing.PaymentService.refund",
+      "kind": "method",
+      "file": "src/billing/PaymentService.java",
+      "line": 8,
+      "language": "java",
+      "feature": "billing",
+      "parent": "src.billing.PaymentService",
+      "calls": [],
+      "params": [
+        "orderId"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/checkout/cart.py::Cart",
+      "name": "Cart",
+      "qualified_name": "Cart",
+      "kind": "class",
+      "file": "src/checkout/cart.py",
+      "line": 5,
+      "language": "python",
+      "feature": "checkout",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": [
+        "tests/checkout/test_service.py::test_checkout_requires_auth"
+      ]
+    },
+    {
+      "id": "src/checkout/cart.py::Cart.__init__",
+      "name": "__init__",
+      "qualified_name": "Cart.__init__",
+      "kind": "method",
+      "file": "src/checkout/cart.py",
+      "line": 6,
+      "language": "python",
+      "feature": "checkout",
+      "parent": "Cart",
+      "calls": [
+        "find_user_by_email"
+      ],
+      "params": [
+        "self",
+        "user_email"
+      ],
+      "writes": [
+        "self.user"
+      ],
+      "resolved_calls": [
+        "src/users/repository.py::find_user_by_email"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "src/checkout/cart.py::Cart.add",
+      "name": "add",
+      "qualified_name": "Cart.add",
+      "kind": "method",
+      "file": "src/checkout/cart.py",
+      "line": 10,
+      "language": "python",
+      "feature": "checkout",
+      "parent": "Cart",
+      "calls": [
+        "self.items.append"
+      ],
+      "params": [
+        "self",
+        "sku",
+        "qty",
+        "price"
+      ],
+      "reads": [
+        "self.items.append",
+        "self.items"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/checkout/cart.py::Cart.total",
+      "name": "total",
+      "qualified_name": "Cart.total",
+      "kind": "method",
+      "file": "src/checkout/cart.py",
+      "line": 13,
+      "language": "python",
+      "feature": "checkout",
+      "parent": "Cart",
+      "calls": [
+        "sum"
+      ],
+      "params": [
+        "self"
+      ],
+      "reads": [
+        "self.items"
+      ],
+      "resolved_calls": [],
+      "called_by": [
+        "src/checkout/service.py::run_checkout"
+      ]
+    },
+    {
+      "id": "src/checkout/service.py::run_checkout",
+      "name": "run_checkout",
+      "qualified_name": "run_checkout",
+      "kind": "function",
+      "file": "src/checkout/service.py",
+      "line": 6,
+      "language": "python",
+      "feature": "checkout",
+      "parent": null,
+      "calls": [
+        "get_user_for_token",
+        "cart.total"
+      ],
+      "params": [
+        "token",
+        "cart"
+      ],
+      "reads": [
+        "cart.items",
+        "cart.total"
+      ],
+      "resolved_calls": [
+        "src/auth/session.py::get_user_for_token",
+        "src/checkout/cart.py::Cart.total"
+      ],
+      "called_by": [
+        "tests/checkout/test_service.py::test_checkout_requires_auth"
+      ]
+    },
+    {
+      "id": "src/frontend/apiClient.js::postJson",
+      "name": "postJson",
+      "qualified_name": "postJson",
+      "kind": "function",
+      "file": "src/frontend/apiClient.js",
+      "line": 3,
+      "language": "javascript",
+      "feature": "frontend",
+      "parent": null,
+      "calls": [],
+      "params": [
+        "url",
+        "payload"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/frontend/apiClient.js::getJson",
+      "name": "getJson",
+      "qualified_name": "getJson",
+      "kind": "function",
+      "file": "src/frontend/apiClient.js",
+      "line": 12,
+      "language": "javascript",
+      "feature": "frontend",
+      "parent": null,
+      "calls": [],
+      "params": [
+        "url"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/frontend/loginForm.js::LoginForm",
+      "name": "LoginForm",
+      "qualified_name": "LoginForm",
+      "kind": "class",
+      "file": "src/frontend/loginForm.js",
+      "line": 2,
+      "language": "javascript",
+      "feature": "frontend",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/frontend/loginForm.js::renderLoginForm",
+      "name": "renderLoginForm",
+      "qualified_name": "renderLoginForm",
+      "kind": "function",
+      "file": "src/frontend/loginForm.js",
+      "line": 12,
+      "language": "javascript",
+      "feature": "frontend",
+      "parent": null,
+      "calls": [],
+      "params": [
+        "target"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/users/repository.py::find_user_by_email",
+      "name": "find_user_by_email",
+      "qualified_name": "find_user_by_email",
+      "kind": "function",
+      "file": "src/users/repository.py",
+      "line": 9,
+      "language": "python",
+      "feature": "users",
+      "parent": null,
+      "calls": [
+        "_USERS.get",
+        "email.lower"
+      ],
+      "params": [
+        "email"
+      ],
+      "reads": [
+        "_USERS.get",
+        "email.lower"
+      ],
+      "resolved_calls": [],
+      "called_by": [
+        "src/auth/login.py::handle_login",
+        "src/checkout/cart.py::Cart.__init__"
+      ]
+    },
+    {
+      "id": "src/users/repository.py::list_users",
+      "name": "list_users",
+      "qualified_name": "list_users",
+      "kind": "function",
+      "file": "src/users/repository.py",
+      "line": 13,
+      "language": "python",
+      "feature": "users",
+      "parent": null,
+      "calls": [
+        "list",
+        "_USERS.values"
+      ],
+      "params": [],
+      "reads": [
+        "_USERS.values"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    }
+  ]
+}

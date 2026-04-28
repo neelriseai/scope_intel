@@ -1,0 +1,89 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:04:20+00:00",
+  "tests": [
+    {
+      "file": "tests/auth/test_login.py",
+      "framework": "pytest",
+      "test_cases": [
+        "test_login_succeeds_for_known_user",
+        "test_login_rejects_unknown_email"
+      ],
+      "language": "python",
+      "feature": "auth",
+      "covers_files": [
+        "src/auth/login.py"
+      ],
+      "covers_features": [
+        "auth"
+      ],
+      "covers_hints": [
+        "src.auth.login",
+        "pytest"
+      ]
+    },
+    {
+      "file": "tests/billing/PaymentControllerTest.java",
+      "framework": "junit",
+      "test_cases": [
+        "chargeReturnsOkForSmallAmounts",
+        "chargeRejectsNegativeAmounts"
+      ],
+      "language": "java",
+      "feature": "billing",
+      "covers_files": [
+        "src/billing/PaymentController.java",
+        "src/billing/PaymentService.java"
+      ],
+      "covers_features": [
+        "billing"
+      ],
+      "covers_hints": [
+        "org.junit.jupiter.api.Test",
+        "src.billing.PaymentController",
+        "src.billing.PaymentService"
+      ]
+    },
+    {
+      "file": "tests/checkout/test_service.py",
+      "framework": "pytest",
+      "test_cases": [
+        "test_checkout_requires_auth",
+        "test_checkout_rejects_empty_cart"
+      ],
+      "language": "python",
+      "feature": "checkout",
+      "covers_files": [
+        "src/checkout/cart.py",
+        "src/checkout/service.py"
+      ],
+      "covers_features": [
+        "checkout"
+      ],
+      "covers_hints": [
+        "src.checkout.service",
+        "src.checkout.cart"
+      ]
+    },
+    {
+      "file": "tests/e2e/login.spec.ts",
+      "framework": "playwright",
+      "test_cases": [
+        "user can log in via the form",
+        "login form rejects empty password"
+      ],
+      "language": "playwright",
+      "feature": "e2e",
+      "covers_files": [
+        "src/auth/login.py"
+      ],
+      "covers_features": [
+        "auth",
+        "e2e"
+      ],
+      "covers_hints": [
+        "@playwright/test"
+      ]
+    }
+  ]
+}

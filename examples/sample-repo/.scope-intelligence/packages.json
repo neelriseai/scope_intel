@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "packages": [
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.sample-repo.src.auth",
+      "language": "python",
+      "files": [
+        "src/auth/login.py"
+      ],
+      "symbols": 5
+    },
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.sample-repo.src.billing",
+      "language": "python",
+      "files": [
+        "src/billing/payment.py"
+      ],
+      "symbols": 4
+    },
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.sample-repo.src.frontend",
+      "language": "python",
+      "files": [
+        "src/frontend/api_client.py"
+      ],
+      "symbols": 2
+    },
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.sample-repo.tests",
+      "language": "python",
+      "files": [
+        "tests/test_auth.py",
+        "tests/test_billing.py"
+      ],
+      "symbols": 7
+    }
+  ]
+}

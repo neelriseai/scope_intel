@@ -1,0 +1,450 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:20:30+00:00",
+  "symbols": [
+    {
+      "id": "tests/test_auth.py::test_issue_token_returns_hex",
+      "name": "test_issue_token_returns_hex",
+      "qualified_name": "test_issue_token_returns_hex",
+      "kind": "function",
+      "file": "tests/test_auth.py",
+      "line": 7,
+      "language": "python",
+      "feature": "tests",
+      "parent": null,
+      "calls": [
+        "_issue_token",
+        "all",
+        "len"
+      ],
+      "params": [],
+      "resolved_calls": [
+        "src/auth/login.py::_issue_token"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "tests/test_auth.py::test_validate_token_accepts_valid",
+      "name": "test_validate_token_accepts_valid",
+      "qualified_name": "test_validate_token_accepts_valid",
+      "kind": "function",
+      "file": "tests/test_auth.py",
+      "line": 13,
+      "language": "python",
+      "feature": "tests",
+      "parent": null,
+      "calls": [
+        "_issue_token",
+        "validate_token"
+      ],
+      "params": [],
+      "resolved_calls": [
+        "src/auth/login.py::_issue_token",
+        "src/auth/login.py::validate_token"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "tests/test_auth.py::test_validate_token_rejects_short",
+      "name": "test_validate_token_rejects_short",
+      "qualified_name": "test_validate_token_rejects_short",
+      "kind": "function",
+      "file": "tests/test_auth.py",
+      "line": 18,
+      "language": "python",
+      "feature": "tests",
+      "parent": null,
+      "calls": [
+        "validate_token"
+      ],
+      "params": [],
+      "resolved_calls": [
+        "src/auth/login.py::validate_token"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "tests/test_billing.py::svc",
+      "name": "svc",
+      "qualified_name": "svc",
+      "kind": "function",
+      "file": "tests/test_billing.py",
+      "line": 9,
+      "language": "python",
+      "feature": "tests",
+      "parent": null,
+      "calls": [
+        "get_payment_service"
+      ],
+      "params": [],
+      "reads": [
+        "pytest.fixture"
+      ],
+      "resolved_calls": [
+        "src/billing/payment.py::get_payment_service"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "tests/test_billing.py::test_charge_valid",
+      "name": "test_charge_valid",
+      "qualified_name": "test_charge_valid",
+      "kind": "function",
+      "file": "tests/test_billing.py",
+      "line": 13,
+      "language": "python",
+      "feature": "tests",
+      "parent": null,
+      "calls": [
+        "_issue_token",
+        "svc.charge"
+      ],
+      "params": [
+        "svc"
+      ],
+      "reads": [
+        "svc.charge"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::_issue_token",
+        "src/billing/payment.py::PaymentService.charge"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "tests/test_billing.py::test_charge_exceeds_limit",
+      "name": "test_charge_exceeds_limit",
+      "qualified_name": "test_charge_exceeds_limit",
+      "kind": "function",
+      "file": "tests/test_billing.py",
+      "line": 19,
+      "language": "python",
+      "feature": "tests",
+      "parent": null,
+      "calls": [
+        "_issue_token",
+        "pytest.raises",
+        "svc.charge"
+      ],
+      "params": [
+        "svc"
+      ],
+      "reads": [
+        "pytest.raises",
+        "svc.charge"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::_issue_token",
+        "src/billing/payment.py::PaymentService.charge"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "tests/test_billing.py::test_refund",
+      "name": "test_refund",
+      "qualified_name": "test_refund",
+      "kind": "function",
+      "file": "tests/test_billing.py",
+      "line": 25,
+      "language": "python",
+      "feature": "tests",
+      "parent": null,
+      "calls": [
+        "_issue_token",
+        "svc.refund"
+      ],
+      "params": [
+        "svc"
+      ],
+      "reads": [
+        "svc.refund"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::_issue_token",
+        "src/billing/payment.py::PaymentService.refund"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "src/auth/login.py::UserSession",
+      "name": "UserSession",
+      "qualified_name": "UserSession",
+      "kind": "class",
+      "file": "src/auth/login.py",
+      "line": 13,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/auth/login.py::UserSession.__init__",
+      "name": "__init__",
+      "qualified_name": "UserSession.__init__",
+      "kind": "method",
+      "file": "src/auth/login.py",
+      "line": 14,
+      "language": "python",
+      "feature": "auth",
+      "parent": "UserSession",
+      "calls": [
+        "datetime.utcnow"
+      ],
+      "params": [
+        "self",
+        "user_id"
+      ],
+      "reads": [
+        "datetime.utcnow"
+      ],
+      "writes": [
+        "self.user_id",
+        "self.created_at"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/auth/login.py::login",
+      "name": "login",
+      "qualified_name": "login",
+      "kind": "function",
+      "file": "src/auth/login.py",
+      "line": 20,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "router.post",
+        "_issue_token"
+      ],
+      "params": [
+        "username",
+        "password"
+      ],
+      "reads": [
+        "router.post"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::_issue_token"
+      ],
+      "called_by": []
+    },
+    {
+      "id": "src/auth/login.py::_issue_token",
+      "name": "_issue_token",
+      "qualified_name": "_issue_token",
+      "kind": "function",
+      "file": "src/auth/login.py",
+      "line": 25,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "hexdigest",
+        "hashlib.sha256",
+        "payload.encode"
+      ],
+      "params": [
+        "username"
+      ],
+      "reads": [
+        "hashlib.sha256",
+        "payload.encode"
+      ],
+      "resolved_calls": [],
+      "called_by": [
+        "src/auth/login.py::login",
+        "tests/test_auth.py::test_issue_token_returns_hex",
+        "tests/test_auth.py::test_validate_token_accepts_valid",
+        "tests/test_billing.py::test_charge_exceeds_limit",
+        "tests/test_billing.py::test_charge_valid",
+        "tests/test_billing.py::test_refund"
+      ]
+    },
+    {
+      "id": "src/auth/login.py::validate_token",
+      "name": "validate_token",
+      "qualified_name": "validate_token",
+      "kind": "function",
+      "file": "src/auth/login.py",
+      "line": 31,
+      "language": "python",
+      "feature": "auth",
+      "parent": null,
+      "calls": [
+        "len"
+      ],
+      "params": [
+        "token"
+      ],
+      "resolved_calls": [],
+      "called_by": [
+        "src/billing/payment.py::PaymentService.charge",
+        "src/billing/payment.py::PaymentService.refund",
+        "tests/test_auth.py::test_validate_token_accepts_valid",
+        "tests/test_auth.py::test_validate_token_rejects_short"
+      ]
+    },
+    {
+      "id": "src/billing/payment.py::PaymentService",
+      "name": "PaymentService",
+      "qualified_name": "PaymentService",
+      "kind": "class",
+      "file": "src/billing/payment.py",
+      "line": 10,
+      "language": "python",
+      "feature": "billing",
+      "parent": null,
+      "calls": [],
+      "params": [],
+      "resolved_calls": [],
+      "called_by": [
+        "src/billing/payment.py::get_payment_service"
+      ]
+    },
+    {
+      "id": "src/billing/payment.py::PaymentService.charge",
+      "name": "charge",
+      "qualified_name": "PaymentService.charge",
+      "kind": "method",
+      "file": "src/billing/payment.py",
+      "line": 11,
+      "language": "python",
+      "feature": "billing",
+      "parent": "PaymentService",
+      "calls": [
+        "validate_token",
+        "ValueError"
+      ],
+      "params": [
+        "self",
+        "token",
+        "amount"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::validate_token"
+      ],
+      "called_by": [
+        "tests/test_billing.py::test_charge_exceeds_limit",
+        "tests/test_billing.py::test_charge_valid"
+      ]
+    },
+    {
+      "id": "src/billing/payment.py::PaymentService.refund",
+      "name": "refund",
+      "qualified_name": "PaymentService.refund",
+      "kind": "method",
+      "file": "src/billing/payment.py",
+      "line": 18,
+      "language": "python",
+      "feature": "billing",
+      "parent": "PaymentService",
+      "calls": [
+        "validate_token",
+        "ValueError"
+      ],
+      "params": [
+        "self",
+        "token",
+        "charge_id"
+      ],
+      "resolved_calls": [
+        "src/auth/login.py::validate_token"
+      ],
+      "called_by": [
+        "tests/test_billing.py::test_refund"
+      ]
+    },
+    {
+      "id": "src/billing/payment.py::get_payment_service",
+      "name": "get_payment_service",
+      "qualified_name": "get_payment_service",
+      "kind": "function",
+      "file": "src/billing/payment.py",
+      "line": 24,
+      "language": "python",
+      "feature": "billing",
+      "parent": null,
+      "calls": [
+        "PaymentService"
+      ],
+      "params": [],
+      "resolved_calls": [
+        "src/billing/payment.py::PaymentService"
+      ],
+      "called_by": [
+        "tests/test_billing.py::svc"
+      ]
+    },
+    {
+      "id": "src/frontend/api_client.py::post_login",
+      "name": "post_login",
+      "qualified_name": "post_login",
+      "kind": "function",
+      "file": "src/frontend/api_client.py",
+      "line": 8,
+      "language": "python",
+      "feature": "frontend",
+      "parent": null,
+      "calls": [
+        "encode",
+        "urllib.request.Request",
+        "urllib.request.urlopen",
+        "json.loads",
+        "json.dumps",
+        "r.read"
+      ],
+      "params": [
+        "username",
+        "password"
+      ],
+      "reads": [
+        "urllib.request.Request",
+        "urllib.request",
+        "urllib.request.urlopen",
+        "json.loads",
+        "json.dumps",
+        "r.read"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    },
+    {
+      "id": "src/frontend/api_client.py::post_charge",
+      "name": "post_charge",
+      "qualified_name": "post_charge",
+      "kind": "function",
+      "file": "src/frontend/api_client.py",
+      "line": 17,
+      "language": "python",
+      "feature": "frontend",
+      "parent": null,
+      "calls": [
+        "encode",
+        "urllib.request.Request",
+        "urllib.request.urlopen",
+        "json.loads",
+        "json.dumps",
+        "r.read"
+      ],
+      "params": [
+        "token",
+        "amount"
+      ],
+      "reads": [
+        "urllib.request.Request",
+        "urllib.request",
+        "urllib.request.urlopen",
+        "json.loads",
+        "json.dumps",
+        "r.read"
+      ],
+      "resolved_calls": [],
+      "called_by": []
+    }
+  ]
+}

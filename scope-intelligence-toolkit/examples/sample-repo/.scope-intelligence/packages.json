@@ -1,0 +1,92 @@
+{
+  "version": "1.0",
+  "packages": [
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src",
+      "language": "python",
+      "files": [
+        "src/__init__.py"
+      ],
+      "symbols": 0
+    },
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.auth",
+      "language": "python",
+      "files": [
+        "src/auth/login.py",
+        "src/auth/session.py",
+        "src/auth/__init__.py"
+      ],
+      "symbols": 9
+    },
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.checkout",
+      "language": "python",
+      "files": [
+        "src/checkout/cart.py",
+        "src/checkout/service.py",
+        "src/checkout/__init__.py"
+      ],
+      "symbols": 5
+    },
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.src.users",
+      "language": "python",
+      "files": [
+        "src/users/repository.py",
+        "src/users/__init__.py"
+      ],
+      "symbols": 2
+    },
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.tests.auth",
+      "language": "python",
+      "files": [
+        "tests/auth/test_login.py"
+      ],
+      "symbols": 2
+    },
+    {
+      "name": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.scope-intelligence-toolkit.examples.sample-repo.tests.checkout",
+      "language": "python",
+      "files": [
+        "tests/checkout/test_service.py"
+      ],
+      "symbols": 2
+    },
+    {
+      "name": "src.billing",
+      "language": "java",
+      "files": [
+        "src/billing/PaymentController.java",
+        "src/billing/PaymentService.java"
+      ],
+      "symbols": 7
+    },
+    {
+      "name": "src/frontend",
+      "language": "javascript",
+      "files": [
+        "src/frontend/apiClient.js",
+        "src/frontend/loginForm.js"
+      ],
+      "symbols": 4
+    },
+    {
+      "name": "tests.billing",
+      "language": "java",
+      "files": [
+        "tests/billing/PaymentControllerTest.java"
+      ],
+      "symbols": 3
+    },
+    {
+      "name": "tests/e2e",
+      "language": "playwright",
+      "files": [
+        "tests/e2e/login.spec.ts"
+      ],
+      "symbols": 0
+    }
+  ]
+}

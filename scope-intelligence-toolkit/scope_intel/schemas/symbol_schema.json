@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SymbolIndex",
+  "description": "Flat list of all symbols (classes, methods, functions) in the repo. No source code is stored — only locations and relationships.",
+  "type": "object",
+  "required": ["version", "generated_at", "symbols"],
+  "properties": {
+    "version": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "symbols": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "kind", "file"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable symbol id, typically <relative-file-path>::<qualified-name>" },
+          "name": { "type": "string" },
+          "qualified_name": { "type": "string" },
+          "kind": { "type": "string", "enum": ["class", "function", "method", "interface", "enum"] },
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "language": { "type": "string" },
+          "feature": { "type": "string" },
+          "parent": { "type": "string", "description": "Parent symbol id (for methods inside classes)" },
+          "calls": { "type": "array", "items": { "type": "string" } },
+          "params": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

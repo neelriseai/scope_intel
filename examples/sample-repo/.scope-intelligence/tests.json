@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-27T11:20:30+00:00",
+  "tests": [
+    {
+      "file": "tests/test_auth.py",
+      "framework": "pytest",
+      "test_cases": [
+        "test_issue_token_returns_hex",
+        "test_validate_token_accepts_valid",
+        "test_validate_token_rejects_short"
+      ],
+      "language": "python",
+      "feature": "tests",
+      "covers_files": [
+        "src/auth/login.py"
+      ],
+      "covers_features": [
+        "auth",
+        "tests"
+      ],
+      "covers_hints": [
+        "pytest",
+        "src.auth.login"
+      ]
+    },
+    {
+      "file": "tests/test_billing.py",
+      "framework": "pytest",
+      "test_cases": [
+        "test_charge_valid",
+        "test_charge_exceeds_limit",
+        "test_refund"
+      ],
+      "language": "python",
+      "feature": "tests",
+      "covers_files": [
+        "src/auth/login.py",
+        "src/billing/payment.py"
+      ],
+      "covers_features": [
+        "auth",
+        "billing",
+        "tests"
+      ],
+      "covers_hints": [
+        "pytest",
+        "src.billing.payment",
+        "src.auth.login"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "symbol": "CheckoutService.processCheckout",
+  "feature_id": "checkout",
+  "kind": "method",
+  "declared_in": "CheckoutService.java",
+  "calls": ["PricingService.calculateFinalPrice"],
+  "called_by": ["CheckoutController.placeOrder"],
+  "reads": ["Cart.totalAmount"],
+  "writes": ["Order.status"],
+  "related_tests": ["CheckoutServiceTest.testSuccessfulCheckout"]
+}

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.venv/
+venv/
+dist/
+build/
+
+# Scope index — keep the index, exclude machine-local log
+# Commit .scope-intelligence/ so teammates get a pre-built index
+.scope-intelligence/query_log.jsonl
+.scope-intelligence/mempalace.jsonl
+
+# Reports
+scope-report.html
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
