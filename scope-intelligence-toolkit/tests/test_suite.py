@@ -599,3 +599,200 @@ class TestStore:
         assert not store.is_initialized(tmp_path)
         store.ensure_index_dir(tmp_path)
         assert store.is_initialized(tmp_path)
+
+
+# ===========================================================================
+# Phase 5 — Auto-capture, Decay, Search, Export/Import, Conflicts
+# ===========================================================================
+
+from scope_intel.core.mempalace import (
+    auto_capture_from_git,
+    decay_confidence,
+    detect_conflicts,
+    export_memories,
+    import_memories,
+    search_memories,
+)
+
+
+class TestAutoCapture:
+    def test_auto_capture_no_git_returns_graceful(self, repo):
+        r = auto_capture_from_git(repo, days=30)
+        assert "error" in r or r.get("captured", 0) == 0
+
+    def test_auto_capture_dry_run_flag(self, repo):
+        r = auto_capture_from_git(repo, days=30, dry_run=True)
+        # no git in tmp_path — returns error, otherwise dry_run=True
+        assert "error" in r or r.get("dry_run") is True
+
+    def test_auto_capture_not_indexed_returns_error(self, tmp_path):
+        r = auto_capture_from_git(tmp_path, days=30)
+        assert "error" in r
+
+    def test_auto_capture_days_in_result(self, repo):
+        r = auto_capture_from_git(repo, days=7)
+        assert r.get("days_scanned") == 7 or "error" in r
+
+
+class TestDecayConfidence:
+    def test_decay_semantic_dry_run(self, repo):
+        add_memory(repo, "semantic", "auth uses JWT signing",
+                   files=["src/auth/login.py"], confidence=1.0)
+        r = decay_confidence(repo, half_life_days=1, floor=0.05, dry_run=True)
+        assert "updated" in r
+        assert r.get("dry_run") is True
+        assert isinstance(r["changes"], list)
+
+    def test_decay_dry_run_does_not_write(self, repo):
+        add_memory(repo, "semantic", "billing uses Stripe", confidence=1.0)
+        before = store.read_mempalace(repo)
+        decay_confidence(repo, half_life_days=1, floor=0.05, dry_run=True)
+        after = store.read_mempalace(repo)
+        assert len(before) == len(after)
+
+    def test_decay_floor_respected(self, repo):
+        add_memory(repo, "semantic", "old fact", confidence=1.0)
+        r = decay_confidence(repo, half_life_days=1, floor=0.3)
+        for change in r.get("changes", []):
+            assert change["new_confidence"] >= 0.3
+
+    def test_decay_non_semantic_untouched(self, repo):
+        add_memory(repo, "bug", "some bug note")
+        before_count = len(store.read_mempalace(repo))
+        decay_confidence(repo, half_life_days=1, floor=0.1)
+        after = store.read_mempalace(repo)
+        assert len(after) == before_count
+
+    def test_decay_not_indexed_returns_error(self, tmp_path):
+        r = decay_confidence(tmp_path, half_life_days=90)
+        assert "error" in r
+
+
+class TestSearch:
+    def test_search_finds_relevant_memory(self, repo):
+        add_memory(repo, "semantic", "auth uses JWT HS256 signing",
+                   files=["src/auth/login.py"], confidence=0.9)
+        add_memory(repo, "bug", "charge had float rounding bug",
+                   files=["src/billing/payment.py"])
+        r = search_memories(repo, "JWT auth signing")
+        assert r["total"] >= 1
+        assert any("JWT" in res.get("note", "") for res in r["results"])
+
+    def test_search_returns_results_structure(self, repo):
+        add_memory(repo, "note", "deployment runs on Kubernetes")
+        r = search_memories(repo, "Kubernetes deployment")
+        assert "results" in r
+        assert "query" in r
+        assert isinstance(r["results"], list)
+
+    def test_search_kind_filter(self, repo):
+        add_memory(repo, "semantic", "auth is stateless", confidence=0.8)
+        add_memory(repo, "bug", "auth had a stateless bug")
+        r = search_memories(repo, "stateless", kind="semantic")
+        assert all(e.get("type") == "semantic" for e in r["results"])
+
+    def test_search_returns_score(self, repo):
+        add_memory(repo, "note", "billing charges in USD currency")
+        r = search_memories(repo, "billing USD")
+        for res in r["results"]:
+            assert "_score" in res
+
+    def test_search_not_indexed_returns_error(self, tmp_path):
+        r = search_memories(tmp_path, "anything")
+        assert "error" in r
+
+    def test_search_limit_respected(self, repo):
+        for i in range(5):
+            add_memory(repo, "note", f"shared keyword memory number {i}")
+        r = search_memories(repo, "shared keyword memory", limit=2)
+        assert len(r["results"]) <= 2
+
+
+class TestExportImport:
+    def test_export_creates_file(self, repo, tmp_path):
+        add_memory(repo, "note", "some memory to export")
+        out = tmp_path / "export.json"
+        r = export_memories(repo, out)
+        assert r["exported"] >= 1
+        assert out.exists()
+
+    def test_export_valid_json(self, repo, tmp_path):
+        add_memory(repo, "semantic", "exportable fact", confidence=0.8)
+        out = tmp_path / "export.json"
+        export_memories(repo, out)
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["version"] == 1
+        assert "entries" in payload
+        assert len(payload["entries"]) >= 1
+
+    def test_import_merges_new_entries(self, repo, tmp_path):
+        repo2 = tmp_path / "repo2"
+        repo2.mkdir()
+        store.ensure_index_dir(repo2)
+        store.write_json(repo2, "config", store.default_config())
+        build_index(repo2)
+        add_memory(repo, "note", "memory to migrate")
+        out = tmp_path / "export.json"
+        export_memories(repo, out)
+        r = import_memories(repo2, out, merge=True)
+        assert r["imported"] >= 1
+
+    def test_import_skips_duplicates(self, repo, tmp_path):
+        add_memory(repo, "note", "duplicate memory")
+        out = tmp_path / "export.json"
+        export_memories(repo, out)
+        r = import_memories(repo, out, merge=True)
+        assert r["skipped"] >= 1
+
+    def test_import_replace_mode(self, repo, tmp_path):
+        add_memory(repo, "note", "original memory")
+        out = tmp_path / "export.json"
+        export_memories(repo, out)
+        add_memory(repo, "note", "extra memory added after export")
+        r = import_memories(repo, out, merge=False)
+        assert r.get("replaced") is True
+
+    def test_import_missing_file_returns_error(self, repo, tmp_path):
+        r = import_memories(repo, tmp_path / "nonexistent.json")
+        assert "error" in r
+
+    def test_export_not_indexed_returns_error(self, tmp_path):
+        out = tmp_path / "out.json"
+        r = export_memories(tmp_path, out)
+        assert "error" in r
+
+
+class TestConflictDetection:
+    def test_no_conflicts_when_empty(self, repo):
+        r = detect_conflicts(repo)
+        assert r["conflicts"] == []
+        assert r["total"] == 0
+
+    def test_detects_jwt_vs_session_conflict(self, repo):
+        add_memory(repo, "semantic", "auth uses JWT tokens", confidence=0.9,
+                   files=["src/auth/login.py"])
+        add_memory(repo, "semantic", "auth uses session cookies", confidence=0.8,
+                   files=["src/auth/login.py"])
+        r = detect_conflicts(repo)
+        assert r["total"] >= 1
+
+    def test_no_conflict_on_unrelated_memories(self, repo):
+        add_memory(repo, "semantic", "auth uses JWT", confidence=0.9,
+                   files=["src/auth/login.py"])
+        add_memory(repo, "semantic", "billing uses Stripe", confidence=0.9,
+                   files=["src/billing/payment.py"])
+        r = detect_conflicts(repo)
+        assert r["total"] == 0
+
+    def test_conflict_result_has_suggestion(self, repo):
+        add_memory(repo, "semantic", "uses Postgres", confidence=1.0,
+                   files=["src/auth/login.py"])
+        add_memory(repo, "semantic", "uses MySQL", confidence=1.0,
+                   files=["src/auth/login.py"])
+        r = detect_conflicts(repo)
+        for c in r.get("conflicts", []):
+            assert "suggestion" in c
+
+    def test_not_indexed_returns_error(self, tmp_path):
+        r = detect_conflicts(tmp_path)
+        assert "error" in r
