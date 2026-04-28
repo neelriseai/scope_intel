@@ -19,9 +19,15 @@ from pathlib import Path
 from .core.diff import compute_diff_scope
 from .core.mempalace import (
     add_memory,
+    auto_capture_from_git,
     compute_churn,
+    decay_confidence,
+    detect_conflicts,
+    export_memories,
     fetch_relevant,
+    import_memories,
     list_memories,
+    search_memories,
 )
 from .core.query_engine import (
     find_impacted_files,
@@ -274,6 +280,95 @@ TOOLS: list[dict] = [
             },
         },
     },
+    # --- Phase 5 tools ---
+    {
+        "name": "mem_auto_capture",
+        "description": (
+            "Scan recent git log and auto-create episodic memories for bug-fix, "
+            "decision, and feature commits. Skips already-captured commits."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "days": {"type": "integer", "default": 30,
+                         "description": "Days of git history to scan."},
+                "dry_run": {"type": "boolean", "default": False,
+                            "description": "Preview without writing."},
+            },
+        },
+    },
+    {
+        "name": "mem_decay",
+        "description": (
+            "Apply exponential confidence decay to semantic memories. "
+            "Confidence halves every `half_life_days` days, floored at `floor`."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "half_life_days": {"type": "integer", "default": 90},
+                "floor": {"type": "number", "default": 0.1},
+                "dry_run": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "mem_search",
+        "description": "TF-IDF free-text search over all memory notes. Returns ranked results.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "query": {"type": "string", "description": "Free-text search query."},
+                "type": {
+                    "type": "string",
+                    "enum": ["semantic", "procedure",
+                             "bug", "decision", "failure", "ownership", "note", "fix"],
+                },
+                "limit": {"type": "integer", "default": 10},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "mem_export",
+        "description": "Export all MemPalace entries to a portable JSON file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "output": {"type": "string", "default": "mempalace_export.json",
+                           "description": "Output file path."},
+            },
+        },
+    },
+    {
+        "name": "mem_import",
+        "description": "Import memories from a portable JSON file (merge by default).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "file": {"type": "string", "description": "Path to exported JSON file."},
+                "replace": {"type": "boolean", "default": False,
+                            "description": "Replace existing mempalace instead of merging."},
+            },
+            "required": ["file"],
+        },
+    },
+    {
+        "name": "mem_conflicts",
+        "description": "Detect potentially contradicting semantic memories in the same scope.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "include_resolved": {"type": "boolean", "default": False},
+            },
+        },
+    },
 ]
 
 
@@ -360,6 +455,42 @@ def _call_tool(name: str, arguments: dict) -> dict:
         )
     if name == "mem_churn":
         return compute_churn(repo, days=arguments.get("days", 90))
+
+    # --- Phase 5 ---
+    if name == "mem_auto_capture":
+        return auto_capture_from_git(
+            repo,
+            days=arguments.get("days", 30),
+            dry_run=arguments.get("dry_run", False),
+        )
+    if name == "mem_decay":
+        return decay_confidence(
+            repo,
+            half_life_days=arguments.get("half_life_days", 90),
+            floor=arguments.get("floor", 0.1),
+            dry_run=arguments.get("dry_run", False),
+        )
+    if name == "mem_search":
+        return search_memories(
+            repo,
+            arguments["query"],
+            kind=arguments.get("type"),
+            limit=arguments.get("limit", 10),
+        )
+    if name == "mem_export":
+        out = arguments.get("output", "mempalace_export.json")
+        return export_memories(repo, Path(out))
+    if name == "mem_import":
+        return import_memories(
+            repo,
+            Path(arguments["file"]),
+            merge=not arguments.get("replace", False),
+        )
+    if name == "mem_conflicts":
+        return detect_conflicts(
+            repo,
+            include_resolved=arguments.get("include_resolved", False),
+        )
 
     return {"error": f"unknown tool: {name}"}
 

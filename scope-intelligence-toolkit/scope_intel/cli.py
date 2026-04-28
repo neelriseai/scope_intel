@@ -27,11 +27,17 @@ from .core.query_engine import (
 )
 from .core.mempalace import (
     add_memory,
+    auto_capture_from_git,
     compute_churn,
+    decay_confidence,
+    detect_conflicts,
+    export_memories,
     fetch_relevant,
+    import_memories,
     list_memories,
     memory_stats,
     resolve_memory,
+    search_memories,
 )
 from .core.reporter import format_global_html, format_global_terminal, format_html, format_terminal
 from .core.summarizer import feature_one_liner
@@ -220,6 +226,64 @@ def build_parser() -> argparse.ArgumentParser:
     p_mchurn.add_argument("--days", type=int, default=90,
                           help="Look back N days (default: 90).")
     p_mchurn.add_argument("--json", action="store_true")
+
+    # mem auto-capture  (Phase 5)
+    p_mac = mem_sub.add_parser("auto-capture",
+                               help="Scan git log and auto-create episodic memories.")
+    p_mac.add_argument("--repo", default=".")
+    p_mac.add_argument("--days", type=int, default=30,
+                       help="Commits to scan (default: last 30 days).")
+    p_mac.add_argument("--dry-run", action="store_true",
+                       help="Preview what would be captured without writing.")
+    p_mac.add_argument("--json", action="store_true")
+
+    # mem decay  (Phase 5)
+    p_mdecay = mem_sub.add_parser("decay",
+                                  help="Apply confidence decay to semantic memories.")
+    p_mdecay.add_argument("--repo", default=".")
+    p_mdecay.add_argument("--half-life", type=int, default=90, dest="half_life",
+                          help="Days for confidence to halve (default: 90).")
+    p_mdecay.add_argument("--floor", type=float, default=0.1,
+                          help="Minimum confidence after decay (default: 0.1).")
+    p_mdecay.add_argument("--dry-run", action="store_true",
+                          help="Preview changes without writing.")
+    p_mdecay.add_argument("--json", action="store_true")
+
+    # mem search  (Phase 5)
+    p_msearch = mem_sub.add_parser("search",
+                                   help="TF-IDF free-text search over memory notes.")
+    p_msearch.add_argument("--repo", default=".")
+    p_msearch.add_argument("query", help="Free-text search query.")
+    p_msearch.add_argument("--type", dest="kind",
+                           choices=["semantic", "procedure",
+                                    "bug", "decision", "failure",
+                                    "ownership", "note", "fix"])
+    p_msearch.add_argument("--limit", type=int, default=10,
+                           help="Max results (default: 10).")
+    p_msearch.add_argument("--json", action="store_true")
+
+    # mem export  (Phase 5)
+    p_mexp = mem_sub.add_parser("export",
+                                help="Export mempalace to a portable JSON file.")
+    p_mexp.add_argument("--repo", default=".")
+    p_mexp.add_argument("--output", default="mempalace_export.json",
+                        help="Output file path (default: mempalace_export.json).")
+
+    # mem import  (Phase 5)
+    p_mimp = mem_sub.add_parser("import",
+                                help="Import memories from a portable JSON file.")
+    p_mimp.add_argument("--repo", default=".")
+    p_mimp.add_argument("file", help="Path to exported JSON file.")
+    p_mimp.add_argument("--replace", action="store_true",
+                        help="Replace existing mempalace (default: merge, skip duplicates).")
+    p_mimp.add_argument("--json", action="store_true")
+
+    # mem conflicts  (Phase 5)
+    p_mconf = mem_sub.add_parser("conflicts",
+                                 help="Detect potentially contradicting semantic memories.")
+    p_mconf.add_argument("--repo", default=".")
+    p_mconf.add_argument("--include-resolved", action="store_true")
+    p_mconf.add_argument("--json", action="store_true")
 
     return p
 
@@ -532,6 +596,78 @@ def _fmt_churn(s: dict) -> None:
         print("\nhigh-churn features:")
         for fid, v in feats.items():
             print(f"  {fid:<20} {v['total_changes']} changes across {len(v['files'])} file(s)")
+
+
+def _fmt_auto_capture(s: dict) -> None:
+    if "error" in s:
+        print(s["error"]); return
+    dry = " [DRY RUN]" if s.get("dry_run") else ""
+    print(f"auto-capture from last {s['days_scanned']} days{dry}")
+    print(f"  captured:             {s['captured']}")
+    print(f"  skipped (existing):   {s['skipped_existing']}")
+    print(f"  skipped (no keyword): {s['skipped_unclassified']}")
+    if s.get("entries"):
+        print("\ncaptured entries:")
+        for e in s["entries"]:
+            print(f"  [{e.get('type','?')}]  {e.get('note','')[:70]}")
+            if e.get("files"):
+                print(f"         files: {', '.join(e['files'][:4])}")
+
+
+def _fmt_decay(s: dict) -> None:
+    if "error" in s:
+        print(s["error"]); return
+    dry = " [DRY RUN]" if s.get("dry_run") else ""
+    print(f"confidence decay  half-life={s['half_life_days']}d  floor={s['floor']}{dry}")
+    print(f"  updated:   {s['updated']}")
+    print(f"  unchanged: {s['unchanged']}")
+    if s.get("changes"):
+        print("\nchanges:")
+        for c in s["changes"]:
+            print(f"  {c['id']}  age={c['age_days']}d  "
+                  f"{c['old_confidence']:.0%} -> {c['new_confidence']:.0%}  "
+                  f"{c['note'][:50]}")
+
+
+def _fmt_search(s: dict) -> None:
+    if "error" in s:
+        print(s["error"]); return
+    results = s.get("results", [])
+    if not results:
+        print(f"no memories matched: {s['query']}"); return
+    print(f"search: \"{s['query']}\"  ({s['total']} results)")
+    print("-" * 60)
+    for e in results:
+        score = e.get("_score", 0)
+        print(f"  score={score:.4f}  [{e.get('type','?')}]  {e['id']}")
+        print(f"  {e.get('note','')}")
+        if e.get("steps"):
+            for i, step in enumerate(e["steps"], 1):
+                print(f"    {i}. {step}")
+        print()
+
+
+def _fmt_conflicts(s: dict) -> None:
+    if "error" in s:
+        print(s["error"]); return
+    print(f"conflict detection: {s['semantic_checked']} semantic memories checked")
+    conflicts = s.get("conflicts", [])
+    if not conflicts:
+        print("  no conflicts detected"); return
+    print(f"  {s['total']} potential conflict(s) found\n")
+    for i, c in enumerate(conflicts, 1):
+        a, b = c["memory_a"], c["memory_b"]
+        print(f"conflict #{i}")
+        print(f"  A  {a['id']}  conf={a['confidence']:.0%}  {a['ts']}")
+        print(f"     {a['note']}")
+        print(f"  B  {b['id']}  conf={b['confidence']:.0%}  {b['ts']}")
+        print(f"     {b['note']}")
+        if c.get("shared_files"):
+            print(f"  shared files: {', '.join(c['shared_files'])}")
+        if c.get("shared_features"):
+            print(f"  shared features: {', '.join(c['shared_features'])}")
+        print(f"  -> {c['suggestion']}")
+        print()
 
 
 def _fmt_diff(s: dict) -> None:
@@ -871,6 +1007,55 @@ def cmd_mem(args) -> int:
     if mc == "churn":
         result = compute_churn(repo, days=args.days)
         _emit(result, args.json, formatter=_fmt_churn)
+        return 0
+
+    if mc == "auto-capture":
+        result = auto_capture_from_git(
+            repo, days=args.days, dry_run=args.dry_run
+        )
+        _emit(result, args.json, formatter=_fmt_auto_capture)
+        return 0
+
+    if mc == "decay":
+        result = decay_confidence(
+            repo,
+            half_life_days=args.half_life,
+            floor=args.floor,
+            dry_run=args.dry_run,
+        )
+        _emit(result, args.json, formatter=_fmt_decay)
+        return 0
+
+    if mc == "search":
+        result = search_memories(
+            repo,
+            args.query,
+            kind=args.kind,
+            limit=args.limit,
+        )
+        _emit(result, args.json, formatter=_fmt_search)
+        return 0
+
+    if mc == "export":
+        result = export_memories(repo, Path(args.output))
+        if "error" in result:
+            print(result["error"], file=sys.stderr); return 2
+        print(f"exported {result['exported']} memories -> {result['output']}")
+        return 0
+
+    if mc == "import":
+        result = import_memories(repo, Path(args.file), merge=not args.replace)
+        if "error" in result:
+            print(result["error"], file=sys.stderr); return 2
+        _emit(result, args.json, formatter=lambda s: print(
+            f"imported {s['imported']} memories  skipped {s['skipped']} duplicates"
+            + (" [replaced]" if s.get("replaced") else "")
+        ))
+        return 0
+
+    if mc == "conflicts":
+        result = detect_conflicts(repo, include_resolved=args.include_resolved)
+        _emit(result, args.json, formatter=_fmt_conflicts)
         return 0
 
     print(f"unknown mem subcommand: {mc}", file=sys.stderr)
