@@ -81,6 +81,101 @@ def log_query(
     return entry
 
 
+def compute_global_summary(repo_roots: list) -> dict:
+    """Aggregate savings across multiple repos into one global summary."""
+    from .mempalace import memory_stats
+
+    repos: list = []
+    combined_entries: list = []
+
+    for root in repo_roots:
+        root = Path(root)
+        entries = store.read_query_log(root)
+        mem = memory_stats(root)
+
+        if not entries:
+            repos.append({
+                "path":           str(root),
+                "name":           root.name,
+                "total_queries":  0,
+                "tokens_saved":   0,
+                "naive_tokens":   0,
+                "scope_tokens":   0,
+                "savings_percent": 0.0,
+                "files_avoided":  0,
+                "loc_avoided":    0,
+                "avg_latency_ms": 0.0,
+                "memory":         mem,
+                "note":           "no queries logged yet",
+            })
+            continue
+
+        saved  = sum(e.get("tokens_saved_est", 0) for e in entries)
+        naive  = sum(e.get("naive_tokens_est", 0) for e in entries)
+        scope  = sum(e.get("scope_tokens_est", 0) for e in entries)
+        avoided_files = sum(e.get("avoided_files", 0) for e in entries)
+        avoided_loc   = sum(e.get("avoided_loc", 0) for e in entries)
+        avg_lat = sum(e.get("latency_ms", 0) for e in entries) / len(entries)
+        pct = round(100 * saved / naive, 1) if naive else 0.0
+
+        # tag each entry with repo name for combined recent list
+        for e in entries:
+            combined_entries.append({**e, "_repo": root.name, "_repo_path": str(root)})
+
+        repos.append({
+            "path":            str(root),
+            "name":            root.name,
+            "total_queries":   len(entries),
+            "tokens_saved":    saved,
+            "naive_tokens":    naive,
+            "scope_tokens":    scope,
+            "savings_percent": pct,
+            "files_avoided":   avoided_files,
+            "loc_avoided":     avoided_loc,
+            "avg_latency_ms":  round(avg_lat, 1),
+            "memory":          mem,
+        })
+
+    # combined totals
+    total_saved  = sum(r["tokens_saved"] for r in repos)
+    total_naive  = sum(r["naive_tokens"] for r in repos)
+    total_scope  = sum(r["scope_tokens"] for r in repos)
+    total_queries = sum(r["total_queries"] for r in repos)
+    total_avoided_files = sum(r["files_avoided"] for r in repos)
+    total_avoided_loc   = sum(r["loc_avoided"] for r in repos)
+    global_pct = round(100 * total_saved / total_naive, 1) if total_naive else 0.0
+
+    # merged by-command
+    by_cmd: dict = {}
+    for e in combined_entries:
+        cmd = e.get("cmd", "?")
+        if cmd not in by_cmd:
+            by_cmd[cmd] = {"queries": 0, "tokens_saved": 0}
+        by_cmd[cmd]["queries"] += 1
+        by_cmd[cmd]["tokens_saved"] += e.get("tokens_saved_est", 0)
+    by_cmd = dict(sorted(by_cmd.items(), key=lambda kv: -kv[1]["tokens_saved"]))
+
+    # recent 20 across all repos, newest first
+    combined_entries.sort(key=lambda e: e.get("ts", ""), reverse=True)
+    recent = combined_entries[:20]
+
+    return {
+        "repos":   repos,
+        "totals": {
+            "repos":            len(repos),
+            "queries":          total_queries,
+            "tokens_saved":     total_saved,
+            "naive_tokens":     total_naive,
+            "scope_tokens":     total_scope,
+            "savings_percent":  global_pct,
+            "files_avoided":    total_avoided_files,
+            "loc_avoided":      total_avoided_loc,
+        },
+        "by_command":    by_cmd,
+        "recent_queries": recent,
+    }
+
+
 def compute_savings_summary(repo_root: Path) -> dict:
     """Aggregate all query log entries into a savings report dict."""
     entries = store.read_query_log(repo_root)

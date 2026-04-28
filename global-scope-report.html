@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scope Intelligence - Global Report</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f1117;
+       color: #e2e8f0; padding: 2rem; }
+h1 { font-size: 1.5rem; font-weight: 700; color: #7dd3fc; margin-bottom: 0.25rem; }
+.sub { font-size: 0.8rem; color: #64748b; margin-bottom: 2rem; }
+.cards { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 2rem; }
+.card { background: #1e293b; border-radius: 0.75rem; padding: 1.25rem 1.5rem;
+        flex: 1; min-width: 160px; border: 1px solid #334155; }
+.card-label { font-size: 0.72rem; color: #64748b; text-transform: uppercase;
+              letter-spacing: .05em; margin-bottom: 0.35rem; }
+.card-value { font-size: 1.9rem; font-weight: 700; color: #38bdf8; }
+.card-value.green { color: #4ade80; }
+.card-value.yellow { color: #fbbf24; }
+.card-value.purple { color: #a78bfa; }
+.card-value.pct { font-size: 2.4rem; }
+section { margin-bottom: 2rem; }
+h2 { font-size: 1rem; color: #94a3b8; margin-bottom: 0.75rem;
+     border-bottom: 1px solid #1e293b; padding-bottom: 0.4rem; }
+.bar-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+.bar-label { width: 160px; font-size: 0.82rem; color: #cbd5e1; text-align: right;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-track { flex: 1; background: #1e293b; border-radius: 4px; height: 18px; }
+.bar-fill { height: 100%; border-radius: 4px; background: #38bdf8;
+            display: flex; align-items: center; padding-left: 6px;
+            font-size: 0.72rem; color: #0f1117; font-weight: 600;
+            min-width: 30px; }
+.bar-fill.green { background: #4ade80; }
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+th { background: #1e293b; color: #94a3b8; text-align: left; padding: 0.5rem 0.75rem;
+     font-weight: 600; border-bottom: 1px solid #334155; }
+td { padding: 0.45rem 0.75rem; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+tr:hover td { background: #1e293b; }
+.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
+         font-size: 0.7rem; font-weight: 600; background: #0369a1; color: #e0f2fe; }
+.note { color: #64748b; font-style: italic; font-size: 0.85rem; }
+
+.repo-table { width:100%; border-collapse:collapse; margin-bottom:2rem; font-size:0.83rem; }
+.repo-table th { background:#1e293b; color:#94a3b8; text-align:left;
+                 padding:0.5rem 0.75rem; font-weight:600; border-bottom:1px solid #334155; }
+.repo-table td { padding:0.45rem 0.75rem; border-bottom:1px solid #1e293b; color:#cbd5e1; }
+.repo-table tr:hover td { background:#1e293b; }
+.savings-bar { height:10px; border-radius:4px; background:#38bdf8;
+               display:inline-block; vertical-align:middle; }
+.dim { color:#64748b; }
+</style>
+</head>
+<body>
+<h1>Scope Intelligence - Global Token Savings Report</h1>
+<div class="sub">All repos &nbsp;|&nbsp; Generated: 2026-04-28 04:40 UTC</div>
+
+<div class="cards">
+  <div class="card"><div class="card-label">Repos tracked</div>
+    <div class="card-value purple">2</div></div>
+  <div class="card"><div class="card-label">Total queries</div>
+    <div class="card-value">17</div></div>
+  <div class="card"><div class="card-label">Tokens saved (est.)</div>
+    <div class="card-value green">17.6K</div></div>
+  <div class="card"><div class="card-label">Global savings %</div>
+    <div class="card-value pct green">61.6%</div></div>
+  <div class="card"><div class="card-label">Naive cost (est.)</div>
+    <div class="card-value yellow">28.6K</div></div>
+  <div class="card"><div class="card-label">Scope cost (est.)</div>
+    <div class="card-value">11.0K</div></div>
+  <div class="card"><div class="card-label">Files avoided</div>
+    <div class="card-value">44</div></div>
+  <div class="card"><div class="card-label">LOC avoided</div>
+    <div class="card-value">1.1K</div></div>
+</div>
+<section><h2>Per-repo breakdown</h2>
+<table class="repo-table"><thead><tr>
+  <th>Repo</th><th>Queries</th><th>Tokens saved</th>
+  <th>Savings %</th><th>Naive cost</th><th>Avg latency</th><th>Memory</th>
+</tr></thead><tbody><tr><td><strong>sample-repo</strong><br><span class='dim' style='font-size:.72rem'>C:\Users\neela\Documents\Generic Intelligence Stratgy\examples\sample-repo</span></td><td>14</td><td><div class="savings-bar" style="width:80px"></div> 15.2K</td><td>59.7%</td><td>25.5K</td><td>12.6 ms</td><td>8 (6 open)</td></tr><tr><td><strong>pragya-sim</strong><br><span class='dim' style='font-size:.72rem'>C:\Users\neela\Documents\Generic Intelligence Stratgy\examples\pragya-sim</span></td><td>3</td><td><div class="savings-bar" style="width:12px"></div> 2.4K</td><td>77.9%</td><td>3.1K</td><td>76.7 ms</td><td>—</td></tr></tbody></table></section><section><h2>Tokens saved by command (all repos)</h2><div class="bar-row"><div class="bar-label">mem_fetch</div><div class="bar-track"><div class="bar-fill green" style="width:100%">6.9K tkn</div></div><span style="color:#64748b;font-size:.75rem">7q</span></div><div class="bar-row"><div class="bar-label">feature</div><div class="bar-track"><div class="bar-fill green" style="width:54%">3.8K tkn</div></div><span style="color:#64748b;font-size:.75rem">3q</span></div><div class="bar-row"><div class="bar-label">tests</div><div class="bar-track"><div class="bar-fill green" style="width:32%">2.3K tkn</div></div><span style="color:#64748b;font-size:.75rem">2q</span></div><div class="bar-row"><div class="bar-label">symbol</div><div class="bar-track"><div class="bar-fill green" style="width:28%">2.0K tkn</div></div><span style="color:#64748b;font-size:.75rem">2q</span></div><div class="bar-row"><div class="bar-label">callers</div><div class="bar-track"><div class="bar-fill green" style="width:18%">1.3K tkn</div></div><span style="color:#64748b;font-size:.75rem">1q</span></div><div class="bar-row"><div class="bar-label">touchpoints</div><div class="bar-track"><div class="bar-fill green" style="width:12%">840 tkn</div></div><span style="color:#64748b;font-size:.75rem">1q</span></div><div class="bar-row"><div class="bar-label">impacted</div><div class="bar-track"><div class="bar-fill green" style="width:7%">540 tkn</div></div><span style="color:#64748b;font-size:.75rem">1q</span></div></section>
+<section><h2>Recent queries — all repos</h2>
+<table><thead><tr>
+  <th>Timestamp</th><th>Repo</th><th>Command</th>
+  <th>Files returned</th><th>Tokens saved</th><th>Latency</th>
+</tr></thead><tbody><tr><td>2026-04-28T04:39:56Z</td><td><span class="badge" style="background:#1d4ed8">pragya-sim</span></td><td><span class='badge'>tests</span></td><td>1</td><td>800</td><td>3 ms</td></tr><tr><td>2026-04-28T04:39:55Z</td><td><span class="badge" style="background:#1d4ed8">pragya-sim</span></td><td><span class='badge'>symbol</span></td><td>1</td><td>820</td><td>3 ms</td></tr><tr><td>2026-04-28T04:39:54Z</td><td><span class="badge" style="background:#1d4ed8">pragya-sim</span></td><td><span class='badge'>feature</span></td><td>1</td><td>810</td><td>224 ms</td></tr><tr><td>2026-04-27T12:14:44Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>mem_fetch</span></td><td>2</td><td>1.2K</td><td>0 ms</td></tr><tr><td>2026-04-27T12:14:00Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>mem_fetch</span></td><td>3</td><td>850</td><td>0 ms</td></tr><tr><td>2026-04-27T12:13:32Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>mem_fetch</span></td><td>3</td><td>850</td><td>0 ms</td></tr><tr><td>2026-04-27T12:02:07Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>mem_fetch</span></td><td>2</td><td>1.2K</td><td>0 ms</td></tr><tr><td>2026-04-27T12:01:18Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>mem_fetch</span></td><td>3</td><td>880</td><td>0 ms</td></tr><tr><td>2026-04-27T12:01:11Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>mem_fetch</span></td><td>2</td><td>1.2K</td><td>0 ms</td></tr><tr><td>2026-04-27T12:01:04Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>mem_fetch</span></td><td>3</td><td>850</td><td>0 ms</td></tr><tr><td>2026-04-27T11:21:56Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>touchpoints</span></td><td>3</td><td>840</td><td>2 ms</td></tr><tr><td>2026-04-27T11:21:46Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>callers</span></td><td>2</td><td>1.3K</td><td>2 ms</td></tr><tr><td>2026-04-27T11:21:45Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>impacted</span></td><td>4</td><td>540</td><td>2 ms</td></tr><tr><td>2026-04-27T11:21:45Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>tests</span></td><td>1</td><td>1.5K</td><td>2 ms</td></tr><tr><td>2026-04-27T11:21:01Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>feature</span></td><td>1</td><td>1.5K</td><td>2 ms</td></tr><tr><td>2026-04-27T11:21:01Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>symbol</span></td><td>2</td><td>1.2K</td><td>3 ms</td></tr><tr><td>2026-04-27T11:21:00Z</td><td><span class="badge" style="background:#1d4ed8">sample-repo</span></td><td><span class='badge'>feature</span></td><td>1</td><td>1.4K</td><td>164 ms</td></tr></tbody></table></section>
+<p class="note" style="margin-top:2rem">
+  Estimates assume 10 tokens/LOC. Naive baseline = reading every indexed file per query.
+  Actual savings depend on session context size.
+</p>
+</body>
+</html>

@@ -1,0 +1,67 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-28T04:39:39+00:00",
+  "files": {
+    "tests/test_engine.py": {
+      "language": "python",
+      "feature": "tests",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.pragya-sim.tests",
+      "hash": "8f65d7e286db902c",
+      "imports_raw": [
+        "pytest",
+        "src.core.engine"
+      ],
+      "imports": [
+        "src/core/engine.py"
+      ],
+      "imported_by": [],
+      "symbols": [
+        "test_run_returns_string",
+        "test_validate_nonempty",
+        "test_validate_empty"
+      ],
+      "loc": 19
+    },
+    "src/api/routes.py": {
+      "language": "python",
+      "feature": "api",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.pragya-sim.src.api",
+      "hash": "00bbe677a8068981",
+      "imports_raw": [
+        "os",
+        "src.core.engine"
+      ],
+      "imports": [
+        "src/core/engine.py"
+      ],
+      "imported_by": [],
+      "symbols": [
+        "handle_prompt",
+        "health"
+      ],
+      "loc": 18
+    },
+    "src/core/engine.py": {
+      "language": "python",
+      "feature": "core",
+      "package": "C:\\.Users.neela.Documents.Generic Intelligence Stratgy.examples.pragya-sim.src.core",
+      "hash": "364883846e8852b8",
+      "imports_raw": [
+        "os"
+      ],
+      "imports": [],
+      "imported_by": [
+        "src/api/routes.py",
+        "tests/test_engine.py"
+      ],
+      "symbols": [
+        "Engine",
+        "__init__",
+        "run",
+        "validate"
+      ],
+      "loc": 17
+    }
+  },
+  "external": {}
+}

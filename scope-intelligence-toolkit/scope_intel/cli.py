@@ -33,9 +33,9 @@ from .core.mempalace import (
     memory_stats,
     resolve_memory,
 )
-from .core.reporter import format_html, format_terminal
+from .core.reporter import format_global_html, format_global_terminal, format_html, format_terminal
 from .core.summarizer import feature_one_liner
-from .core.tracker import compute_savings_summary, log_query
+from .core.tracker import compute_global_summary, compute_savings_summary, log_query
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "CLAUDE.md.tmpl"
 
@@ -138,6 +138,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_rep.add_argument("--html", action="store_true", help="Generate HTML dashboard.")
     p_rep.add_argument("--output", default="scope-report.html",
                        help="Output path for --html (default: scope-report.html).")
+
+    # global-report — cross-repo dashboard
+    p_gr = sub.add_parser("global-report",
+                           help="Aggregated token savings across multiple repos.")
+    p_gr.add_argument("--repo", action="append", dest="repos", default=[],
+                      metavar="PATH",
+                      help="Repo path to include (repeat for each repo).")
+    p_gr.add_argument("--html", action="store_true", help="Generate HTML dashboard.")
+    p_gr.add_argument("--output", default="global-scope-report.html",
+                      help="Output path for --html (default: global-scope-report.html).")
 
     # serve — MCP stdio server
     sub.add_parser("serve", help="Start MCP JSON-RPC 2.0 stdio server.")
@@ -776,6 +786,26 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_global_report(args) -> int:
+    if not args.repos:
+        print("error: provide at least one --repo path", file=sys.stderr)
+        return 2
+    repo_paths = [Path(r).resolve() for r in args.repos]
+    missing = [str(p) for p in repo_paths if not (p / ".scope-intelligence").exists()]
+    if missing:
+        for m in missing:
+            print(f"warning: no scope index at {m} — run `scope init && scope index` there first",
+                  file=sys.stderr)
+    g = compute_global_summary(repo_paths)
+    if args.html:
+        out = Path(args.output).resolve()
+        out.write_text(format_global_html(g), encoding="utf-8")
+        print(f"global report written to {out}")
+    else:
+        print(format_global_terminal(g))
+    return 0
+
+
 def cmd_serve(_args) -> int:
     from .mcp_server import serve
     serve()
@@ -863,9 +893,10 @@ HANDLERS = {
     "callees":     cmd_callees,
     "touchpoints": cmd_touchpoints,
     "diff":        cmd_diff,
-    "report":      cmd_report,
-    "serve":       cmd_serve,
-    "mem":         cmd_mem,
+    "report":         cmd_report,
+    "global-report":  cmd_global_report,
+    "serve":          cmd_serve,
+    "mem":            cmd_mem,
 }
 
 
