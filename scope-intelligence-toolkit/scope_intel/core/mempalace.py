@@ -24,11 +24,22 @@ Fetch layering (what Claude sees before touching a file):
   3. procedural  — step-by-step workflows for this scope
   4. episodic    — past incidents newest-first
 
+Phase 5 additions:
+  auto_capture_from_git() — scan git log, auto-create episodic memories
+  decay_confidence()      — age semantic memories by half-life
+  search_memories()       — TF-IDF free-text search over all memory notes
+  export_memories()       — serialize mempalace to portable JSON
+  import_memories()       — merge portable JSON back into mempalace
+  detect_conflicts()      — flag contradicting semantic memories
+
 Storage: .scope-intelligence/mempalace.jsonl (append-only JSONL)
 """
 from __future__ import annotations
 
 import hashlib
+import json as _json
+import math
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -440,4 +451,491 @@ def memory_stats(repo_root: Path) -> dict:
         "resolved": len(entries) - open_count,
         "by_type": by_type,
         "most_noted_files": [{"file": f, "entries": n} for f, n in most_noted],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Auto-episodic capture from git
+# ---------------------------------------------------------------------------
+
+_BUG_KEYWORDS = re.compile(
+    r"\b(fix|bug|error|broken|crash|revert|regression|hotfix|patch|oops)\b", re.I
+)
+_DECISION_KEYWORDS = re.compile(
+    r"\b(refactor|design|switch|migrate|choose|replace|adopt|deprecate|drop|upgrade)\b", re.I
+)
+_FEAT_KEYWORDS = re.compile(
+    r"\b(feat|feature|add|implement|introduce|support|enable)\b", re.I
+)
+
+
+def auto_capture_from_git(
+    repo_root: Path,
+    *,
+    days: int = 30,
+    dry_run: bool = False,
+    author: str = "auto-capture",
+) -> dict:
+    """Scan recent git log and create episodic memories for notable commits.
+
+    Commit classification:
+      bug/fix keywords  → type="fix"
+      decision keywords → type="decision"
+      feat keywords     → type="note"
+
+    Already-captured commits (id contains commit hash) are skipped.
+    Returns: {captured, skipped_existing, skipped_unclassified, dry_run, entries[]}
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    try:
+        result = subprocess.run(
+            ["git", "log", f"--since={days} days ago",
+             "--format=%H|%aI|%ae|%s", "--name-only", "--diff-filter=AM"],
+            cwd=str(repo_root),
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            return {"error": "git log failed — is this a git repo?"}
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return {"error": str(exc)}
+
+    # parse blocks separated by blank lines
+    existing = store.read_mempalace(repo_root)
+    existing_hashes = {
+        e.get("git_hash") for e in existing if e.get("git_hash")
+    }
+
+    commits: list = []
+    current: dict = {}
+    for line in result.stdout.splitlines():
+        if "|" in line and len(line.split("|")) >= 4:
+            parts = line.split("|", 3)
+            current = {
+                "hash": parts[0].strip(),
+                "ts": parts[1].strip(),
+                "email": parts[2].strip(),
+                "subject": parts[3].strip(),
+                "files": [],
+            }
+            commits.append(current)
+        elif line.strip() and current:
+            current["files"].append(line.strip())
+
+    captured, skipped_existing, skipped_unclassified = 0, 0, 0
+    new_entries: list = []
+
+    for c in commits:
+        if c["hash"] in existing_hashes:
+            skipped_existing += 1
+            continue
+
+        subject = c["subject"]
+        if _BUG_KEYWORDS.search(subject):
+            kind = "fix"
+        elif _DECISION_KEYWORDS.search(subject):
+            kind = "decision"
+        elif _FEAT_KEYWORDS.search(subject):
+            kind = "note"
+        else:
+            skipped_unclassified += 1
+            continue
+
+        # map changed files to known features
+        features_data = store.read_json(repo_root, "features", {"features": []})
+        touched_features: list = []
+        for feat in features_data.get("features", []):
+            feat_files = set(feat.get("files", []))
+            if feat_files & set(c["files"]):
+                touched_features.append(feat["id"])
+
+        entry = add_memory(
+            repo_root, kind,
+            note=f"[git] {subject}",
+            files=c["files"][:10],
+            features=touched_features,
+            author=c.get("email") or author,
+        ) if not dry_run else {
+            "id": "dry_run",
+            "type": kind,
+            "note": f"[git] {subject}",
+            "git_hash": c["hash"],
+            "files": c["files"][:10],
+            "features": touched_features,
+        }
+
+        if not dry_run and "error" not in entry:
+            # patch in git_hash for dedup on future runs
+            existing_entries = store.read_mempalace(repo_root)
+            last = existing_entries[-1] if existing_entries else {}
+            if last.get("id") == entry.get("id"):
+                last["git_hash"] = c["hash"]
+                _rewrite_mempalace(repo_root, existing_entries[:-1] + [last])
+
+        new_entries.append({**entry, "git_hash": c["hash"]})
+        captured += 1
+
+    return {
+        "captured": captured,
+        "skipped_existing": skipped_existing,
+        "skipped_unclassified": skipped_unclassified,
+        "dry_run": dry_run,
+        "days_scanned": days,
+        "entries": new_entries,
+    }
+
+
+def _rewrite_mempalace(repo_root: Path, entries: list) -> None:
+    path = store.mempalace_path(repo_root)
+    with path.open("w", encoding="utf-8") as f:
+        for e in entries:
+            f.write(_json.dumps(e, ensure_ascii=False) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Confidence decay
+# ---------------------------------------------------------------------------
+
+def decay_confidence(
+    repo_root: Path,
+    *,
+    half_life_days: int = 90,
+    floor: float = 0.1,
+    dry_run: bool = False,
+) -> dict:
+    """Apply exponential confidence decay to all semantic memories.
+
+    new_confidence = max(floor, original * 0.5^(age_days / half_life_days))
+
+    Decay is applied relative to the memory's creation timestamp.
+    Returns: {updated, unchanged, dry_run, changes[]}
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    entries = store.read_mempalace(repo_root)
+    now = time.time()
+    updated_entries: list = []
+    changes: list = []
+    updated_count = 0
+    unchanged_count = 0
+
+    for e in entries:
+        if e.get("type") != "semantic":
+            updated_entries.append(e)
+            continue
+
+        ts_str = e.get("ts", "")
+        try:
+            import datetime
+            ts_dt = datetime.datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
+            ts_dt = ts_dt.replace(tzinfo=datetime.timezone.utc)
+            age_days = (now - ts_dt.timestamp()) / 86400
+        except (ValueError, OSError):
+            updated_entries.append(e)
+            unchanged_count += 1
+            continue
+
+        old_conf = e.get("confidence", 1.0)
+        decay_factor = 0.5 ** (age_days / half_life_days)
+        new_conf = round(max(floor, old_conf * decay_factor), 4)
+
+        if abs(new_conf - old_conf) < 0.0001:
+            updated_entries.append(e)
+            unchanged_count += 1
+            continue
+
+        changes.append({
+            "id": e["id"],
+            "note": e.get("note", "")[:60],
+            "age_days": round(age_days, 1),
+            "old_confidence": old_conf,
+            "new_confidence": new_conf,
+        })
+
+        new_e = dict(e)
+        new_e["confidence"] = new_conf
+        updated_entries.append(new_e)
+        updated_count += 1
+
+    if not dry_run and changes:
+        _rewrite_mempalace(repo_root, updated_entries)
+
+    return {
+        "updated": updated_count,
+        "unchanged": unchanged_count,
+        "dry_run": dry_run,
+        "half_life_days": half_life_days,
+        "floor": floor,
+        "changes": changes,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — TF-IDF semantic search
+# ---------------------------------------------------------------------------
+
+def _tokenize(text: str) -> list:
+    return re.findall(r"[a-z0-9_]+", text.lower())
+
+
+def search_memories(
+    repo_root: Path,
+    query: str,
+    *,
+    kind: Optional[str] = None,
+    include_resolved: bool = False,
+    limit: int = 10,
+) -> dict:
+    """Search all memory notes using TF-IDF similarity.
+
+    Returns memories ranked by relevance to the free-text query.
+    Falls back to substring match if TF-IDF yields no results.
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    all_entries = store.read_mempalace(repo_root)
+    candidates: list = []
+    for e in all_entries:
+        if e.get("resolved") and not include_resolved:
+            continue
+        if kind and e.get("type") != kind:
+            continue
+        candidates.append(e)
+
+    if not candidates:
+        return {"query": query, "results": [], "total": 0}
+
+    # build corpus: note + step text + tags
+    def _doc(e: dict) -> str:
+        parts = [e.get("note", "")]
+        parts.extend(e.get("steps", []))
+        parts.extend(e.get("tags", []))
+        return " ".join(parts)
+
+    docs = [_doc(e) for e in candidates]
+    query_tokens = set(_tokenize(query))
+
+    # compute IDF across corpus
+    N = len(docs)
+    df: dict = {}
+    tokenized_docs: list = []
+    for doc in docs:
+        tokens = _tokenize(doc)
+        tokenized_docs.append(tokens)
+        for tok in set(tokens):
+            df[tok] = df.get(tok, 0) + 1
+
+    idf: dict = {
+        tok: math.log((N + 1) / (freq + 1)) + 1
+        for tok, freq in df.items()
+    }
+
+    # score each document against query
+    scored: list = []
+    for i, (tokens, e) in enumerate(zip(tokenized_docs, candidates)):
+        if not tokens:
+            continue
+        tf: dict = {}
+        for tok in tokens:
+            tf[tok] = tf.get(tok, 0) + 1
+        score = 0.0
+        for qtok in query_tokens:
+            if qtok in tf:
+                score += (tf[qtok] / len(tokens)) * idf.get(qtok, 1.0)
+        if score > 0:
+            scored.append((score, e))
+
+    scored.sort(key=lambda x: -x[0])
+
+    # fallback: substring match if TF-IDF returned nothing
+    if not scored:
+        ql = query.lower()
+        for e in candidates:
+            if ql in _doc(e).lower():
+                scored.append((0.01, e))
+
+    results = [
+        {**e, "_score": round(s, 4)}
+        for s, e in scored[:limit]
+    ]
+
+    return {
+        "query": query,
+        "results": results,
+        "total": len(results),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Export / Import
+# ---------------------------------------------------------------------------
+
+def export_memories(repo_root: Path, output_path: Path) -> dict:
+    """Export all mempalace entries to a portable JSON file."""
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    entries = store.read_mempalace(repo_root)
+    payload = {
+        "version": 1,
+        "exported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "repo": str(repo_root),
+        "total": len(entries),
+        "entries": entries,
+    }
+    output_path = Path(output_path)
+    output_path.write_text(_json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {
+        "exported": len(entries),
+        "output": str(output_path),
+    }
+
+
+def import_memories(
+    repo_root: Path,
+    input_path: Path,
+    *,
+    merge: bool = True,
+) -> dict:
+    """Import memories from a portable JSON file.
+
+    merge=True (default): skip entries whose id already exists.
+    merge=False: replace mempalace entirely with the imported set.
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    input_path = Path(input_path)
+    if not input_path.exists():
+        return {"error": f"file not found: {input_path}"}
+
+    try:
+        payload = _json.loads(input_path.read_text(encoding="utf-8"))
+    except _json.JSONDecodeError as exc:
+        return {"error": f"invalid JSON: {exc}"}
+
+    incoming = payload.get("entries", [])
+    if not incoming:
+        return {"imported": 0, "skipped": 0, "note": "no entries in file"}
+
+    if not merge:
+        _rewrite_mempalace(repo_root, incoming)
+        return {"imported": len(incoming), "skipped": 0, "replaced": True}
+
+    existing = store.read_mempalace(repo_root)
+    existing_ids = {e.get("id") for e in existing}
+    added: list = []
+    skipped = 0
+    for e in incoming:
+        if e.get("id") in existing_ids:
+            skipped += 1
+            continue
+        store.append_mempalace(repo_root, e)
+        added.append(e)
+
+    return {
+        "imported": len(added),
+        "skipped": skipped,
+        "source": str(input_path),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Conflict detection
+# ---------------------------------------------------------------------------
+
+_NEGATION_PATTERNS = [
+    (re.compile(r"\buse[sd]?\b", re.I), re.compile(r"\bdoes not use\b|\bnot use\b|\bavoid\b|\bno longer\b", re.I)),
+    (re.compile(r"\bJWT\b"), re.compile(r"\bsession\b|\bcookie\b", re.I)),
+    (re.compile(r"\bsession\b", re.I), re.compile(r"\bJWT\b|\btoken\b", re.I)),
+    (re.compile(r"\bPostgres\b", re.I), re.compile(r"\bMySQL\b|\bSQLite\b|\bMongo\b", re.I)),
+    (re.compile(r"\bsync\b", re.I), re.compile(r"\basync\b|\bawait\b", re.I)),
+    (re.compile(r"\bdeprecated\b", re.I), re.compile(r"\bactive\b|\bcurrent\b|\blatest\b", re.I)),
+]
+
+
+def _notes_conflict(note_a: str, note_b: str) -> bool:
+    """Heuristic: do two notes appear to contradict each other?"""
+    a, b = note_a.lower(), note_b.lower()
+    for pos_pat, neg_pat in _NEGATION_PATTERNS:
+        if pos_pat.search(a) and neg_pat.search(b):
+            return True
+        if pos_pat.search(b) and neg_pat.search(a):
+            return True
+    # direct negation: one note contains "not X" and the other contains "X"
+    words_a = set(_tokenize(a))
+    words_b = set(_tokenize(b))
+    shared = words_a & words_b
+    if not shared:
+        return False
+    neg_a = bool(re.search(r"\bnot\b|\bno\b|\bnever\b|\bremoved\b", a))
+    neg_b = bool(re.search(r"\bnot\b|\bno\b|\bnever\b|\bremoved\b", b))
+    return neg_a != neg_b and bool(shared - {"the", "a", "is", "in", "of", "and", "or"})
+
+
+def detect_conflicts(
+    repo_root: Path,
+    *,
+    include_resolved: bool = False,
+) -> dict:
+    """Detect potentially contradicting semantic memories.
+
+    Checks pairs of semantic memories that share file/feature scope.
+    Returns a list of conflict pairs with an explanation.
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    entries = store.read_mempalace(repo_root)
+    semantics = [
+        e for e in entries
+        if e.get("type") == "semantic"
+        and (include_resolved or not e.get("resolved"))
+    ]
+
+    conflicts: list = []
+    checked = set()
+
+    for i, a in enumerate(semantics):
+        a_files = set(a.get("scope", {}).get("files", []))
+        a_feats = set(a.get("scope", {}).get("features", []))
+
+        for j, b in enumerate(semantics):
+            if j <= i:
+                continue
+            pair_key = (a["id"], b["id"])
+            if pair_key in checked:
+                continue
+            checked.add(pair_key)
+
+            b_files = set(b.get("scope", {}).get("files", []))
+            b_feats = set(b.get("scope", {}).get("features", []))
+
+            # only compare memories in overlapping scope
+            scope_overlap = bool(
+                (a_files & b_files) or (a_feats & b_feats)
+                or (not a_files and not a_feats)  # global memories
+                or (not b_files and not b_feats)
+            )
+            if not scope_overlap:
+                continue
+
+            if _notes_conflict(a.get("note", ""), b.get("note", "")):
+                conflicts.append({
+                    "memory_a": {"id": a["id"], "note": a.get("note"), "ts": a.get("ts"),
+                                 "confidence": a.get("confidence", 1.0)},
+                    "memory_b": {"id": b["id"], "note": b.get("note"), "ts": b.get("ts"),
+                                 "confidence": b.get("confidence", 1.0)},
+                    "shared_files": sorted(a_files & b_files),
+                    "shared_features": sorted(a_feats & b_feats),
+                    "suggestion": "Review both — resolve the outdated one with: scope mem resolve <id>",
+                })
+
+    return {
+        "conflicts": conflicts,
+        "total": len(conflicts),
+        "semantic_checked": len(semantics),
     }
