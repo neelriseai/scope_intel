@@ -14,6 +14,17 @@ relates_to: elephant-memory, episodic-memory, scope-intelligence-toolkit
 Before mapping animals to software, understand what each animal is *famous for* and *why*.
 The philosophy is the lesson. The biology is the proof.
 
+### 🐴 Horse — The Prey Animal's Intelligence
+Famous for: hyper-vigilance, reading emotional tension, social synchronization, herd coordination.
+The horse is the ONLY animal in this framework shaped entirely by being prey.
+Its entire nervous system architecture exists to avoid being caught off guard.
+It sees ~350° simultaneously without choosing where to look. It reacts before it reasons —
+body moves first, cortex catches up. Its nervous system literally couples to nearby emotional states
+(handler heart rates synchronize). Safety memory is contextual, not categorical.
+**Philosophy: recall over precision. False positives are acceptable. False negatives are death.**
+The horse layer fires before reasoning begins — constitutional limits that cannot be argued around.
+In a multi-agent herd, one agent's alert elevates the whole system's vigilance.
+
 ### 🐕 Dog — The Human-Aligned Companion
 Famous for: loyalty, reading human emotion, role memory, never forgetting its handler.
 The dog is the ONLY animal in this framework that co-evolved specifically with humans —
@@ -117,6 +128,7 @@ A severed octopus arm still reacts for an hour — the local mind persists witho
 
 **Nature's lesson: each animal solved a different problem. Together they form a complete system.**
 
+- Horse    → *what must never happen, pre-cognitively* (constitutional safety — fires before reasoning)
 - Dog      → *who is asking and in what state* (human alignment — wraps everything)
 - Elephant → *what to remember for the long term* (depth + durability)
 - Eagle    → *what to look at right now* (selective attention on visible signals)
@@ -393,6 +405,7 @@ Stay with flat mempalace if:
 
 | Layer | Skill File | Nature Model | Core Question |
 |---|---|---|---|
+| Constitutional safety | `horse-vigilance/SKILL.md` | Horse 🐴 | What must never happen, before reasoning begins? |
 | Human alignment | `dog-companion/SKILL.md` | Dog 🐕 | Who is asking, in what state, needing what? |
 
 This layer wraps the entire pipeline. It does not process data — it processes the human.
