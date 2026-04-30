@@ -67,6 +67,38 @@ from typing import Optional
 from . import store
 from .mempalace import add_memory, detect_conflicts
 
+
+# ---------------------------------------------------------------------------
+# Memory dedup helper
+# ---------------------------------------------------------------------------
+
+def _existing_memory_notes(repo_root: Path) -> set[str]:
+    """Return a set of lowercased note texts already in mempalace.jsonl.
+
+    Used to skip memories that were stored in a previous ingest run so
+    re-ingesting the same document doesn't create duplicate entries.
+    Reads the JSONL file directly (no full list_memories() call) for speed.
+    """
+    mp_path = store.mempalace_path(repo_root)
+    if not mp_path.exists():
+        return set()
+    notes: set[str] = set()
+    try:
+        for line in mp_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                note = entry.get("note", "")
+                if note:
+                    notes.add(note.lower())
+            except json.JSONDecodeError:
+                continue
+    except OSError:
+        pass
+    return notes
+
 # ---------------------------------------------------------------------------
 # Progress helper — writes to stderr so JSON stdout stays clean
 # ---------------------------------------------------------------------------
@@ -658,8 +690,9 @@ def _ingest_with_llm(
     # --- memories: all key_facts across all buckets ---
     memories_added: list[str] = []
     if not dry_run:
-        # Collect + deduplicate key_facts (Swan: clean before storing)
-        seen_facts: set[str] = set()
+        # Seed seen_facts from existing mempalace so re-ingesting the same
+        # document doesn't produce duplicate memory entries (Swan purity).
+        seen_facts: set[str] = _existing_memory_notes(repo_root)
         for data in buckets.values():
             for kf in data["key_facts"]:
                 fact_text = kf.get("fact", "") if isinstance(kf, dict) else str(kf)
@@ -950,8 +983,10 @@ def _ingest_python_only(
 
     # --- memories (per-section with section tag so mem-fetch works by feature) ---
     memories_added: list[str] = []
-    seen_notes: set[str] = set()
     if not dry_run:
+        # Seed seen_notes from existing mempalace to avoid duplicate entries
+        # on re-ingest of the same document.
+        seen_notes: set[str] = _existing_memory_notes(repo_root)
         for s in sections:
             section_body = s.get("body_text", "")
             if not section_body.strip():
