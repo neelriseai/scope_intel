@@ -888,6 +888,66 @@ class TestDocStats:
 
 
 # ---------------------------------------------------------------------------
+# doc source hash + --if-changed
+# ---------------------------------------------------------------------------
+
+class TestDocHashAndIfChanged:
+    """Test source hash tracking and --if-changed skip logic."""
+
+    def test_ingest_result_has_source_hash(self, repo, md_file):
+        result = ingest_document(repo, md_file, overwrite=True)
+        assert "source_hash" in result
+        assert len(result["source_hash"]) == 16  # first 16 hex chars
+        assert result["source_hash"].isalnum()
+
+    def test_source_hash_is_consistent(self, repo, md_file):
+        r1 = ingest_document(repo, md_file, overwrite=True)
+        r2 = ingest_document(repo, md_file, overwrite=True)
+        assert r1["source_hash"] == r2["source_hash"]
+
+    def test_source_hash_changes_when_doc_changes(self, repo, md_file):
+        r1 = ingest_document(repo, md_file, overwrite=True)
+        # Modify the file
+        orig = md_file.read_text(encoding="utf-8")
+        md_file.write_text(orig + "\n## New Section\n\nExtra content.\n", encoding="utf-8")
+        r2 = ingest_document(repo, md_file, overwrite=True)
+        assert r1["source_hash"] != r2["source_hash"]
+
+    def test_if_changed_skips_when_unchanged(self, repo, md_file):
+        # First ingest writes the hash to index.json
+        ingest_document(repo, md_file, overwrite=True)
+        # Second call with if_changed=True should skip
+        result = ingest_document(repo, md_file, if_changed=True)
+        assert result.get("unchanged") is True
+        assert result["files_written"] == 0
+        assert "source_hash" in result
+
+    def test_if_changed_runs_when_doc_modified(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        # Modify the doc
+        orig = md_file.read_text(encoding="utf-8")
+        md_file.write_text(orig + "\n## Extra\n\nMore overview content.\n", encoding="utf-8")
+        # Should NOT skip — doc changed
+        result = ingest_document(repo, md_file, if_changed=True, overwrite=True)
+        assert not result.get("unchanged")
+        assert result["files_written"] >= 0  # may write or skip existing
+
+    def test_if_changed_runs_when_no_prior_ingest(self, repo, md_file):
+        # No prior index.json → always run
+        result = ingest_document(repo, md_file, if_changed=True, overwrite=True)
+        assert not result.get("unchanged")
+        assert "error" not in result
+
+    def test_index_json_contains_source_hash(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        index = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        assert "source_hash" in index
+        assert len(index["source_hash"]) == 16
+
+
+# ---------------------------------------------------------------------------
 # doc export helper
 # ---------------------------------------------------------------------------
 

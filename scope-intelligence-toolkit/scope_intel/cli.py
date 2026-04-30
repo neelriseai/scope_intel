@@ -202,6 +202,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--second-pass", action="store_true",
         help="Run a second Qwen pass to synthesise module-map.md from all component summaries.",
     )
+    p_ingest.add_argument(
+        "--if-changed", action="store_true", dest="if_changed",
+        help=(
+            "Skip ingest if the source document has not changed since the last run "
+            "(compared by SHA-256 hash stored in index.json)."
+        ),
+    )
     p_ingest.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc list — show what's been generated
@@ -1102,6 +1109,14 @@ def _fmt_ingest(r: dict) -> None:
     if "error" in r:
         print(r["error"]); return
 
+    # --if-changed shortcut: doc unchanged, nothing to do
+    if r.get("unchanged"):
+        print(f"scope doc ingest  [unchanged — skipped]")
+        print(f"  source: {r['source']}")
+        print(f"  hash:   {r.get('source_hash', '?')}  (matches stored hash)")
+        print(f"  note:   {r.get('note', '')}")
+        return
+
     dry = "  [DRY RUN — nothing written]" if r.get("dry_run") else ""
     mode_tag = f"  [mode={r.get('mode','python')}]" if r.get("mode") else ""
     print(f"scope doc ingest{dry}{mode_tag}")
@@ -1223,10 +1238,27 @@ def _doc_list(repo: Path) -> dict:
             rel = str(p.relative_to(repo)).replace("\\", "/")
             curated.append({"id": p.stem, "path": rel, "layer": "curated"})
 
+    # Check if source doc has changed since last ingest
+    source_hash   = index.get("source_hash", "")
+    source_name   = index.get("source", "")
+    doc_changed   = False
+    if source_hash and source_name:
+        # Try to find the source doc relative to the repo root (best-effort)
+        for candidate in [repo / source_name,
+                          repo / "docs" / source_name,
+                          repo / "design" / source_name]:
+            if candidate.exists():
+                from .core.doc_ingestor import _doc_hash as _dh
+                current_hash = _dh(candidate)
+                doc_changed = bool(current_hash and current_hash != source_hash)
+                break
+
     return {
-        "source":       index.get("source", "?"),
+        "source":       source_name or "?",
         "generated_at": index.get("generated_at", "?"),
+        "source_hash":  source_hash,
         "mode":         index.get("mode", "?"),
+        "doc_changed":  doc_changed,
         "generated":    generated,
         "curated":      curated,
         "total":        len(generated) + len(curated),
@@ -1236,8 +1268,9 @@ def _doc_list(repo: Path) -> dict:
 def _fmt_doc_list(r: dict) -> None:
     if "error" in r:
         print(r["error"]); return
+    changed_tag = "  ⚠ source doc changed — run `scope doc rebuild`" if r.get("doc_changed") else ""
     print(f"AI context files — {r['total']} total  "
-          f"(source: {r['source']}  mode: {r['mode']}  at: {r['generated_at']})")
+          f"(source: {r['source']}  mode: {r['mode']}  at: {r['generated_at']}){changed_tag}")
     if r.get("generated"):
         print("\ngenerated/")
         for f in r["generated"]:
@@ -1581,6 +1614,7 @@ def cmd_doc(args) -> int:
             ollama_model=args.ollama_model,
             ollama_url=args.ollama_url,
             second_pass=args.second_pass,
+            if_changed=getattr(args, "if_changed", False),
         )
         _emit(result, args.json, formatter=_fmt_ingest)
         return 0 if "error" not in result else 2

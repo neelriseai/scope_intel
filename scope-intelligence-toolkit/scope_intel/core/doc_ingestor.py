@@ -57,6 +57,7 @@ caller knows what was skipped.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
@@ -66,6 +67,38 @@ from typing import Optional
 
 from . import store
 from .mempalace import add_memory, detect_conflicts
+
+
+# ---------------------------------------------------------------------------
+# Source document hash helper
+# ---------------------------------------------------------------------------
+
+def _doc_hash(doc_path: Path) -> str:
+    """Compute a short SHA-256 fingerprint of the source document.
+
+    Returns the first 16 hex characters (64-bit) — collision-safe for our use case.
+    Used to detect when a source doc has changed since the last ingest run.
+    """
+    h = hashlib.sha256()
+    try:
+        with open(doc_path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                h.update(chunk)
+    except OSError:
+        return ""
+    return h.hexdigest()[:16]
+
+
+def _read_index_hash(repo_root: Path) -> str:
+    """Read the stored source_hash from .ai-context/generated/index.json (or '')."""
+    index_path = repo_root / ".ai-context" / "generated" / "index.json"
+    if not index_path.exists():
+        return ""
+    try:
+        data = json.loads(index_path.read_text(encoding="utf-8"))
+        return data.get("source_hash", "")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -746,9 +779,11 @@ def _ingest_with_llm(
 
     # --- index.json ---
     index_path = gen_dir / "index.json"
+    source_hash = _doc_hash(doc_path)
     index_data = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source":       doc_path.name,
+        "source_hash":  source_hash,
         "mode":         "llm",
         "llm_model":    getattr(llm, "model", "unknown"),
         "total_files":  len(generated_files),
@@ -843,6 +878,7 @@ def _ingest_with_llm(
         "format":                fmt,
         "mode":                  "llm",
         "dry_run":               dry_run,
+        "source_hash":           source_hash,
         "sections_parsed":       len(chunks),
         "sections_unmatched":    len(set(unmatched)),
         "files_written":         written_count,
@@ -876,6 +912,7 @@ def ingest_document(
     ollama_model: str = "qwen2.5:14b",
     ollama_url: str = "http://localhost:11434",
     second_pass: bool = False,
+    if_changed: bool = False,
 ) -> dict:
     """Parse a design document and generate .ai-context/ files.
 
@@ -889,6 +926,7 @@ def ingest_document(
         ollama_model:     Ollama model to use in mode='llm'.
         ollama_url:       Ollama server URL.
         second_pass:      Run second Qwen pass for module-map.md synthesis.
+        if_changed:       Skip ingest if source doc hash matches stored hash.
 
     Returns a result dict summarising what was (or would be) generated.
     """
@@ -901,6 +939,32 @@ def ingest_document(
         return {"error": "repo not indexed — run `scope init` first"}
     if not doc_path.exists():
         return {"error": f"document not found: {doc_path}"}
+
+    # --if-changed: skip if source hash matches what was stored from the last run
+    if if_changed:
+        current_hash  = _doc_hash(doc_path)
+        stored_hash   = _read_index_hash(repo_root)
+        if current_hash and stored_hash and current_hash == stored_hash:
+            return {
+                "source":          str(doc_path),
+                "format":          doc_path.suffix.lstrip(".").lower() or "?",
+                "mode":            mode,
+                "dry_run":         False,
+                "unchanged":       True,
+                "source_hash":     current_hash,
+                "sections_parsed": 0,
+                "sections_unmatched": 0,
+                "files_written":   0,
+                "files_skipped":   0,
+                "memories_added":  0,
+                "features_added":  0,
+                "generated":       [],
+                "skipped":         [],
+                "unmatched_sections": [],
+                "routing_table":   [],
+                "conflicts_after_ingest": None,
+                "note": "Source document unchanged since last ingest — skipped.",
+            }
 
     # --- LLM mode: dispatch to 5-step pipeline ---
     if mode == "llm":
@@ -1067,14 +1131,17 @@ def _ingest_python_only(
 
     # --- index.json ---
     index_path = gen_dir / "index.json"
+    source_hash = _doc_hash(doc_path)
     index_data = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "source": doc_path.name,
-        "total_files": len(generated_files),
+        "source":       doc_path.name,
+        "source_hash":  source_hash,
+        "mode":         "python",
+        "total_files":  len(generated_files),
         "files": [
             {
-                "id": f["path"].split("/")[-1].replace(".md", ""),
-                "path": f["path"],
+                "id":    f["path"].split("/")[-1].replace(".md", ""),
+                "path":  f["path"],
                 "title": f["title"],
                 "layer": f["layer"],
             }
@@ -1156,21 +1223,22 @@ def _ingest_python_only(
 
     written_count = sum(1 for f in generated_files if f.get("status") == "written")
     result: dict = {
-        "source": str(doc_path),
-        "format": read_result.get("format", "?"),
-        "mode":   "python",
-        "dry_run": dry_run,
-        "sections_parsed": len(sections),
+        "source":             str(doc_path),
+        "format":             read_result.get("format", "?"),
+        "mode":               "python",
+        "dry_run":            dry_run,
+        "source_hash":        _doc_hash(doc_path),
+        "sections_parsed":    len(sections),
         "sections_unmatched": len(unmatched),
-        "files_written": written_count,
-        "files_skipped": len(skipped_files),
-        "memories_added": len(memories_added),
-        "features_added": len(features_added),
-        "generated": generated_files,
-        "skipped": skipped_files,
+        "files_written":      written_count,
+        "files_skipped":      len(skipped_files),
+        "memories_added":     len(memories_added),
+        "features_added":     len(features_added),
+        "generated":          generated_files,
+        "skipped":            skipped_files,
         "unmatched_sections": unmatched,
         "conflicts_after_ingest": conflicts_after,
-        "routing_table": routing_table,
+        "routing_table":      routing_table,
     }
     # Pass through PDF reader info if available ("pdfplumber" or "pypdf")
     if read_result.get("reader"):
