@@ -523,9 +523,15 @@ def _ingest_with_llm(
             }
 
         if target_file == "skip" or target_file not in TARGET_FILE_MAP:
-            if chunk["title"] and chunk["title"] != "(preamble)":
-                unmatched.append(chunk["title"])
-            continue
+            # Preamble (text before first heading) defaults to project overview
+            # instead of being silently discarded — it's often the executive summary.
+            if chunk["title"] == "(preamble)" and chunk.get("text", "").strip():
+                target_file = "001-project-overview.md"
+                classification["target_file"] = target_file
+            else:
+                if chunk["title"] and chunk["title"] != "(preamble)":
+                    unmatched.append(chunk["title"])
+                continue
 
         if target_file not in buckets:
             buckets[target_file] = {
@@ -839,20 +845,24 @@ def _ingest_python_only(
         dest_type, prefix, slug = _route_section(
             s["title"], s.get("body_text", "")
         )
-        if dest_type and slug:
-            key = (dest_type, slug)
-            if key not in buckets:
-                buckets[key] = {
-                    "dest": dest_type,
-                    "prefix": prefix,
-                    "slug": slug,
-                    "primary_title": s["title"],
-                    "sections": [],
-                }
-            buckets[key]["sections"].append(s)
-        else:
-            if s["title"] != "(preamble)" and s.get("body_text"):
-                unmatched.append(s["title"])
+        if not (dest_type and slug):
+            # Preamble with content → project overview (executive summary is valuable)
+            if s["title"] == "(preamble)" and s.get("body_text", "").strip():
+                dest_type, prefix, slug = "generated", "001", "project-overview"
+            else:
+                if s["title"] != "(preamble)" and s.get("body_text"):
+                    unmatched.append(s["title"])
+                continue
+        key = (dest_type, slug)
+        if key not in buckets:
+            buckets[key] = {
+                "dest": dest_type,
+                "prefix": prefix,
+                "slug": slug,
+                "primary_title": s["title"] if s["title"] != "(preamble)" else "Project Overview",
+                "sections": [],
+            }
+        buckets[key]["sections"].append(s)
 
     # --- prepare output dirs ---
     ai_ctx = repo_root / ".ai-context"

@@ -1083,7 +1083,12 @@ def _fmt_ingest(r: dict) -> None:
 
 
 def _doc_list(repo: Path) -> dict:
-    """Return manifest of .ai-context/ files for this repo."""
+    """Return manifest of .ai-context/ files for this repo.
+
+    index.json may include curated files (layer='curated') because ingest
+    writes all generated_files there. We split by layer so the caller gets
+    clean generated / curated lists without duplicates.
+    """
     index_path = repo / ".ai-context" / "generated" / "index.json"
     if not index_path.exists():
         return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
@@ -1092,6 +1097,12 @@ def _doc_list(repo: Path) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"error": f"index.json unreadable: {exc}"}
 
+    # Split index files by layer to avoid mixing curated into the generated list
+    all_files = index.get("files", [])
+    generated = [f for f in all_files if f.get("layer", "generated") == "generated"]
+
+    # Curated: authoritative source is the filesystem (not index.json which may
+    # include curated entries or may have been written by an older version).
     curated_dir = repo / ".ai-context" / "curated"
     curated: list[dict] = []
     if curated_dir.exists():
@@ -1100,12 +1111,12 @@ def _doc_list(repo: Path) -> dict:
             curated.append({"id": p.stem, "path": rel, "layer": "curated"})
 
     return {
-        "source":      index.get("source", "?"),
+        "source":       index.get("source", "?"),
         "generated_at": index.get("generated_at", "?"),
-        "mode":        index.get("mode", "?"),
-        "generated":   index.get("files", []),
-        "curated":     curated,
-        "total":       len(index.get("files", [])) + len(curated),
+        "mode":         index.get("mode", "?"),
+        "generated":    generated,
+        "curated":      curated,
+        "total":        len(generated) + len(curated),
     }
 
 

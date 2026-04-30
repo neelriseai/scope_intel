@@ -573,6 +573,8 @@ def _call_tool(name: str, arguments: dict) -> dict:
         if not index_path.exists():
             return {"error": "no .ai-context/ found — run doc_ingest first"}
         index = _json.loads(index_path.read_text(encoding="utf-8"))
+        all_files = index.get("files", [])
+        generated = [f for f in all_files if f.get("layer", "generated") == "generated"]
         curated_dir = repo / ".ai-context" / "curated"
         curated = []
         if curated_dir.exists():
@@ -586,9 +588,9 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "source":       index.get("source", "?"),
             "generated_at": index.get("generated_at", "?"),
             "mode":         index.get("mode", "?"),
-            "generated":    index.get("files", []),
+            "generated":    generated,
             "curated":      curated,
-            "total":        len(index.get("files", [])) + len(curated),
+            "total":        len(generated) + len(curated),
         }
     if name == "doc_fetch":
         import json as _json
