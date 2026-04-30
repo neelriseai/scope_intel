@@ -280,6 +280,65 @@ TOOLS: list[dict] = [
             },
         },
     },
+    # --- Doc ingest ---
+    {
+        "name": "doc_ingest",
+        "description": (
+            "Parse a design document (PDF/DOCX/MD/TXT) and generate .ai-context/ files. "
+            "Produces: generated/ context docs, curated/ state files, "
+            "mempalace semantic memories, and feature stubs. "
+            "mode='python' uses fast regex routing (no LLM). "
+            "mode='llm' uses Qwen/Ollama for per-chunk classification — "
+            "richer extraction, requires Ollama running at ollama_url."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "doc": {
+                    "type": "string",
+                    "description": "Absolute path to the design document.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["python", "llm"],
+                    "default": "python",
+                    "description": "'python' = fast regex (default). 'llm' = Qwen classification.",
+                },
+                "ollama_model": {
+                    "type": "string",
+                    "default": "qwen2.5:14b",
+                    "description": "Ollama model for mode=llm (default: qwen2.5:14b).",
+                },
+                "ollama_url": {
+                    "type": "string",
+                    "default": "http://localhost:11434",
+                    "description": "Ollama server URL (default: http://localhost:11434).",
+                },
+                "overwrite": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Regenerate files that already exist.",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Parse and report without writing anything.",
+                },
+                "second_pass": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Run second Qwen pass to synthesise module-map.md (mode=llm only).",
+                },
+                "update_claude_md": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Append scope-intel section to CLAUDE.md.",
+                },
+            },
+            "required": ["doc"],
+        },
+    },
     # --- Phase 5 tools ---
     {
         "name": "mem_auto_capture",
@@ -455,6 +514,21 @@ def _call_tool(name: str, arguments: dict) -> dict:
         )
     if name == "mem_churn":
         return compute_churn(repo, days=arguments.get("days", 90))
+
+    # --- Doc ingest ---
+    if name == "doc_ingest":
+        from .core.doc_ingestor import ingest_document
+        return ingest_document(
+            repo,
+            Path(arguments["doc"]),
+            mode=arguments.get("mode", "python"),
+            ollama_model=arguments.get("ollama_model", "qwen2.5:14b"),
+            ollama_url=arguments.get("ollama_url", "http://localhost:11434"),
+            overwrite=arguments.get("overwrite", False),
+            dry_run=arguments.get("dry_run", False),
+            second_pass=arguments.get("second_pass", False),
+            update_claude_md=arguments.get("update_claude_md", True),
+        )
 
     # --- Phase 5 ---
     if name == "mem_auto_capture":

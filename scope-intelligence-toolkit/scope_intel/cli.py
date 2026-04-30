@@ -39,6 +39,7 @@ from .core.mempalace import (
     resolve_memory,
     search_memories,
 )
+from .core.doc_ingestor import ingest_document
 from .core.reporter import format_global_html, format_global_terminal, format_html, format_terminal
 from .core.summarizer import feature_one_liner
 from .core.tracker import compute_global_summary, compute_savings_summary, log_query
@@ -157,6 +158,51 @@ def build_parser() -> argparse.ArgumentParser:
 
     # serve — MCP stdio server
     sub.add_parser("serve", help="Start MCP JSON-RPC 2.0 stdio server.")
+
+    # doc — document ingestion
+    p_doc = sub.add_parser("doc", help="Document ingestion — parse design docs into .ai-context/.")
+    doc_sub = p_doc.add_subparsers(dest="doc_cmd", required=True)
+
+    p_ingest = doc_sub.add_parser(
+        "ingest",
+        help="Parse a design doc (PDF/DOCX/MD/TXT) and generate .ai-context/ files.",
+    )
+    p_ingest.add_argument("doc", help="Path to the design document.")
+    p_ingest.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_ingest.add_argument(
+        "--overwrite", action="store_true",
+        help="Regenerate files that already exist (default: skip existing).",
+    )
+    p_ingest.add_argument(
+        "--dry-run", action="store_true",
+        help="Parse and report what would be generated without writing anything.",
+    )
+    p_ingest.add_argument(
+        "--no-claude-md", action="store_true",
+        help="Skip updating CLAUDE.md at repo root.",
+    )
+    p_ingest.add_argument(
+        "--mode", choices=["python", "llm"], default="python",
+        help=(
+            "Extraction mode. "
+            "'python' = fast regex routing, no LLM (default). "
+            "'llm'    = Qwen/Ollama classifies each chunk — richer extraction, "
+            "requires Ollama running locally."
+        ),
+    )
+    p_ingest.add_argument(
+        "--ollama-model", default="qwen2.5:14b", metavar="MODEL",
+        help="Ollama model to use in --mode llm (default: qwen2.5:14b).",
+    )
+    p_ingest.add_argument(
+        "--ollama-url", default="http://localhost:11434", metavar="URL",
+        help="Ollama server URL (default: http://localhost:11434).",
+    )
+    p_ingest.add_argument(
+        "--second-pass", action="store_true",
+        help="Run a second Qwen pass to synthesise module-map.md from all component summaries.",
+    )
+    p_ingest.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # mem — MemPalace long-term memory
     p_mem = sub.add_parser("mem", help="MemPalace: long-term knowledge store.")
@@ -948,6 +994,79 @@ def cmd_serve(_args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Doc ingest formatter + handler
+# ---------------------------------------------------------------------------
+
+def _fmt_ingest(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+
+    dry = "  [DRY RUN — nothing written]" if r.get("dry_run") else ""
+    mode_tag = f"  [mode={r.get('mode','python')}]" if r.get("mode") else ""
+    print(f"scope doc ingest{dry}{mode_tag}")
+    print(f"  source:            {r['source']}")
+    print(f"  format:            {r['format']}")
+    print(f"  sections parsed:   {r['sections_parsed']}")
+    print(f"  sections unmatched:{r['sections_unmatched']}")
+    print(f"  files written:     {r['files_written']}")
+    print(f"  files skipped:     {r['files_skipped']}")
+    print(f"  memories added:    {r['memories_added']}")
+    print(f"  features added:    {r['features_added']}")
+    if r.get("llm_chunks_classified"):
+        print(f"  chunks classified: {r['llm_chunks_classified']}  "
+              f"(llm={r.get('llm_chunks_by_llm',0)}  fallback={r.get('llm_chunks_fallback',0)})")
+    if r.get("conflicts_after_ingest") is not None:
+        n = r["conflicts_after_ingest"]
+        flag = "  ⚠ run: scope mem conflicts" if n > 0 else ""
+        print(f"  post-ingest conflicts: {n}{flag}")
+
+    written = [f for f in r.get("generated", []) if f.get("status") == "written"]
+    skipped = [f for f in r.get("generated", []) if f.get("status") == "skipped_existing"]
+
+    if written:
+        print("\ngenerated files:")
+        for f in sorted(written, key=lambda x: x["path"]):
+            layer_tag = f"[{f['layer']}]"
+            print(f"  {layer_tag:<12} {f['path']}")
+
+    if skipped:
+        print("\nskipped (already exist — use --overwrite to regenerate):")
+        for f in sorted(skipped, key=lambda x: x["path"]):
+            print(f"  {f['path']}")
+
+    if r.get("unmatched_sections"):
+        print(f"\nunmatched sections ({len(r['unmatched_sections'])}) "
+              f"— not routed to any output file:")
+        for title in r["unmatched_sections"][:10]:
+            print(f"  - {title}")
+        if len(r["unmatched_sections"]) > 10:
+            print(f"  ... +{len(r['unmatched_sections']) - 10} more")
+
+
+def cmd_doc(args) -> int:
+    if args.doc_cmd == "ingest":
+        repo = _resolve_repo(args.repo)
+        if _not_indexed(repo):
+            return 2
+        result = ingest_document(
+            repo,
+            Path(args.doc),
+            overwrite=args.overwrite,
+            dry_run=args.dry_run,
+            update_claude_md=not args.no_claude_md,
+            mode=args.mode,
+            ollama_model=args.ollama_model,
+            ollama_url=args.ollama_url,
+            second_pass=args.second_pass,
+        )
+        _emit(result, args.json, formatter=_fmt_ingest)
+        return 0 if "error" not in result else 2
+
+    print(f"unknown doc subcommand: {args.doc_cmd}", file=sys.stderr)
+    return 2
+
+
 def cmd_mem(args) -> int:
     repo = _resolve_repo(args.repo)
     mc = args.mem_cmd
@@ -1081,6 +1200,7 @@ HANDLERS = {
     "report":         cmd_report,
     "global-report":  cmd_global_report,
     "serve":          cmd_serve,
+    "doc":            cmd_doc,
     "mem":            cmd_mem,
 }
 
