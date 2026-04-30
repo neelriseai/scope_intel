@@ -14,6 +14,17 @@ relates_to: elephant-memory, episodic-memory, scope-intelligence-toolkit
 Before mapping animals to software, understand what each animal is *famous for* and *why*.
 The philosophy is the lesson. The biology is the proof.
 
+### 🐕 Dog — The Human-Aligned Companion
+Famous for: loyalty, reading human emotion, role memory, never forgetting its handler.
+The dog is the ONLY animal in this framework that co-evolved specifically with humans —
+changing its own physiology (the eyebrow muscle for "puppy eyes," gaze-following, face-processing cortex)
+to become better at understanding us. Not trained to comply — built to align.
+The dog reads gesture, tone, mood, and urgency before the question is even finished.
+It guards its territory and role faithfully without being reminded.
+**Philosophy: alignment is not instruction-following. It is understanding what the human needs, not just what they said.**
+The dog layer wraps AROUND the entire pipeline — it doesn't process data, it processes the human.
+Every other animal is about what the system knows. The dog is about who it serves.
+
 ### 🐘 Elephant — The Living World Map
 Famous for: "An elephant never forgets."
 But the depth goes further. The elephant matriarch IS the herd's collective memory.
@@ -104,16 +115,24 @@ A severed octopus arm still reacts for an hour — the local mind persists witho
 
 ## The Core Insight
 
-**Nature's lesson: each animal solved a different memory problem. Together they form a complete system.**
+**Nature's lesson: each animal solved a different problem. Together they form a complete system.**
 
+- Dog      → *who is asking and in what state* (human alignment — wraps everything)
 - Elephant → *what to remember for the long term* (depth + durability)
-- Eagle → *what to look at right now* (selective attention)
-- Bee → *how to search in parallel with consensus* (distributed retrieval)
-- Spider → *how things connect* (relational structure)
-- Octopus → *how to distribute without a centre* (autonomous agents)
+- Eagle    → *what to look at right now* (selective attention on visible signals)
+- Heron    → *when to act at all* (threshold gate on hidden signals)
+- Bee      → *how to search in parallel with consensus* (distributed retrieval)
+- Ant      → *which paths have worked before* (reinforced retrieval + pipeline workers)
+- Crow     → *how to construct what isn't there* (sequential inference)
+- Swan     → *how to make results pure* (discernment before delivery)
+- Spider   → *how things connect* (relational structure)
+- Mouse    → *what nobody knew to look for* (experimental discovery)
+- Pigeon   → *how messages reliably reach the right place* (permanent routing)
+- Octopus  → *how to distribute without a centre* (autonomous agents)
 
 In software terms: these are not competing approaches — they are complementary layers
 that address different failure modes of a single flat memory store.
+The dog is the only layer that operates at the human boundary, not inside the processing core.
 
 ---
 
@@ -369,6 +388,14 @@ Stay with flat mempalace if:
 ---
 
 ## Skill Files Per Layer
+
+### Human Interface Layer — Who Is Being Served
+
+| Layer | Skill File | Nature Model | Core Question |
+|---|---|---|---|
+| Human alignment | `dog-companion/SKILL.md` | Dog 🐕 | Who is asking, in what state, needing what? |
+
+This layer wraps the entire pipeline. It does not process data — it processes the human.
 
 ### Storage Layers — What Gets Remembered
 
