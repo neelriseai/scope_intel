@@ -227,6 +227,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_fetch.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
     p_fetch.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc clear — remove generated .ai-context/ files
+    p_clear = doc_sub.add_parser(
+        "clear",
+        help="Remove all .ai-context/ generated files (keeps curated/ by default).",
+    )
+    p_clear.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_clear.add_argument(
+        "--all", action="store_true", dest="clear_all",
+        help="Also remove curated/ files (constraints.md, current-phase.md, module-map.md).",
+    )
+    p_clear.add_argument(
+        "--dry-run", action="store_true",
+        help="Show what would be removed without deleting anything.",
+    )
+
     # mem — MemPalace long-term memory
     p_mem = sub.add_parser("mem", help="MemPalace: long-term knowledge store.")
     mem_sub = p_mem.add_subparsers(dest="mem_cmd", required=True)
@@ -1239,6 +1254,62 @@ def cmd_doc(args) -> int:
         result = _doc_fetch(repo, args.name)
         _emit(result, args.json, formatter=_fmt_doc_fetch)
         return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "clear":
+        repo = _resolve_repo(args.repo)
+        ai_ctx = repo / ".ai-context"
+        if not ai_ctx.exists():
+            print("nothing to clear — .ai-context/ does not exist")
+            return 0
+
+        removed: list[str] = []
+        skipped: list[str] = []
+
+        # Always clear generated/
+        gen_dir = ai_ctx / "generated"
+        if gen_dir.exists():
+            for p in sorted(gen_dir.iterdir()):
+                rel = str(p.relative_to(repo)).replace("\\", "/")
+                if args.dry_run:
+                    skipped.append(rel)
+                else:
+                    p.unlink()
+                    removed.append(rel)
+            if not args.dry_run:
+                gen_dir.rmdir()  # remove dir only if empty
+
+        # Optionally clear curated/
+        if args.clear_all:
+            cur_dir = ai_ctx / "curated"
+            if cur_dir.exists():
+                for p in sorted(cur_dir.iterdir()):
+                    rel = str(p.relative_to(repo)).replace("\\", "/")
+                    if args.dry_run:
+                        skipped.append(rel)
+                    else:
+                        p.unlink()
+                        removed.append(rel)
+                if not args.dry_run:
+                    cur_dir.rmdir()
+
+        # Remove .ai-context/ dir itself if now empty
+        if not args.dry_run:
+            try:
+                ai_ctx.rmdir()  # only succeeds if empty
+            except OSError:
+                pass  # not empty — curated/ still there, or other files
+
+        if args.dry_run:
+            print(f"[dry run] would remove {len(skipped)} files:")
+            for f in skipped:
+                print(f"  {f}")
+        else:
+            print(f"removed {len(removed)} files from .ai-context/")
+            for f in removed:
+                print(f"  {f}")
+            if not args.clear_all:
+                print("curated/ preserved — use --all to also remove curated files")
+        return 0
 
     print(f"unknown doc subcommand: {args.doc_cmd}", file=sys.stderr)
     return 2
