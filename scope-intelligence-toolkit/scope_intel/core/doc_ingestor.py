@@ -576,9 +576,20 @@ def _ingest_with_llm(
             }
 
         buckets[target_file]["sections"].append(chunk)
-        buckets[target_file]["key_facts"].extend(
-            classification.get("key_facts", [])
+
+        # Map chunk-level importance → default confidence for key_facts that
+        # lack an explicit 'conf' field.  high→0.85  medium→0.75  low→0.60
+        _imp_conf = {"high": 0.85, "medium": 0.75, "low": 0.60}
+        imp_default = _imp_conf.get(
+            str(classification.get("importance", "medium")).lower(), 0.75
         )
+        enriched_facts = []
+        for kf in classification.get("key_facts", []):
+            if isinstance(kf, dict) and "conf" not in kf:
+                kf = dict(kf, conf=imp_default)   # inject default conf
+            enriched_facts.append(kf)
+        buckets[target_file]["key_facts"].extend(enriched_facts)
+
         buckets[target_file]["constraints"].extend(
             classification.get("constraints", [])
         )
@@ -693,23 +704,32 @@ def _ingest_with_llm(
         # Seed seen_facts from existing mempalace so re-ingesting the same
         # document doesn't produce duplicate memory entries (Swan purity).
         seen_facts: set[str] = _existing_memory_notes(repo_root)
-        for data in buckets.values():
+        for target_file, data in buckets.items():
+            # Derive a feature-like tag from the target file (e.g. "memory-layer")
+            tf_slug = TARGET_FILE_MAP.get(target_file, ("", None, target_file))[2]
+            section_tag = tf_slug or doc_path.stem
+
             for kf in data["key_facts"]:
                 fact_text = kf.get("fact", "") if isinstance(kf, dict) else str(kf)
                 if not fact_text or fact_text.lower() in seen_facts:
                     continue
                 seen_facts.add(fact_text.lower())
                 conf = kf.get("conf", 0.75) if isinstance(kf, dict) else 0.75
+                tags = list(dict.fromkeys(
+                    ["doc-ingest", "llm", section_tag, doc_path.stem]
+                    + list(data.get("tags", set()))
+                ))
                 result = add_memory(
                     repo_root, "semantic", fact_text,
                     confidence=min(max(float(conf), 0.1), 1.0),
-                    tags=["doc-ingest", "llm", doc_path.stem],
+                    tags=tags,
                 )
                 if "error" not in result:
                     memories_added.append(result["id"])
 
         # Also store constraints as high-confidence semantic memories
-        for data in buckets.values():
+        for target_file, data in buckets.items():
+            tf_slug = TARGET_FILE_MAP.get(target_file, ("", None, target_file))[2]
             for c in data.get("constraints", []):
                 if not c or c.lower() in seen_facts:
                     continue
@@ -717,7 +737,7 @@ def _ingest_with_llm(
                 result = add_memory(
                     repo_root, "semantic", f"Constraint: {c}",
                     confidence=0.90,
-                    tags=["doc-ingest", "constraint", doc_path.stem],
+                    tags=["doc-ingest", "constraint", tf_slug, doc_path.stem],
                 )
                 if "error" not in result:
                     memories_added.append(result["id"])
