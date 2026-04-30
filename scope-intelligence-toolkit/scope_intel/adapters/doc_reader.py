@@ -28,9 +28,21 @@ Two reading modes:
       Long sections (> MAX_CHUNK_TOKENS) are split with OVERLAP_TOKENS
       overlap so context is not lost at split boundaries.
 
+Tables and images:
+  MD  tables  — already plain text, pass through as-is.
+  DOCX tables — extracted in document order, rendered as markdown tables.
+  PDF  tables — pdfplumber (if installed) extracts bounding-box-aware tables
+                as markdown; pypdf fallback provides text-only (may scramble cols).
+  DOCX images — alt-text / title attributes extracted as [Image: description]
+                markers (no extra deps — uses XML attributes Word writes by default).
+  PDF images  — silently skipped (binary pixel data requires OCR or vision model).
+  All images  — for OCR use pytesseract; for visual semantics use a vision model
+                (e.g. qwen-vl / llava via Ollama /api/generate with images field).
+
 Optional dependencies (installed only if you ingest that format):
-  PDF  → pip install pypdf
-  DOCX → pip install python-docx
+  PDF (best)  → pip install pdfplumber   ← tables + reading order
+  PDF (basic) → pip install pypdf        ← text only, no table structure
+  DOCX        → pip install python-docx
 
 MD / TXT need no extra packages.
 """
@@ -85,15 +97,103 @@ def _read_text(path: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def _read_pdf(path: Path) -> dict:
+    """Read a PDF file.
+
+    Strategy (best-effort, graceful degradation):
+      1. Try pdfplumber first — understands bounding boxes, extracts
+         tables as markdown and text in reading order. Optional dep.
+      2. Fall back to pypdf — text only, no table structure.
+         Cells from multi-column layouts may be interleaved.
+      3. Fail with a clear message if neither is installed.
+
+    Install:
+      pip install pdfplumber   ← best (tables + reading order)
+      pip install pypdf        ← fallback (text only)
+    """
+    try:
+        import pdfplumber  # type: ignore
+        return _read_pdf_pdfplumber(path, pdfplumber)
+    except ImportError:
+        pass  # fall through to pypdf
+
     try:
         import pypdf  # type: ignore
+        return _read_pdf_pypdf(path, pypdf)
     except ImportError:
         return {
             "error": (
-                "pypdf is required to read PDF files.\n"
-                "Install it with:  pip install pypdf"
+                "No PDF library found.\n"
+                "Install pdfplumber (recommended):  pip install pdfplumber\n"
+                "Or pypdf (text only):              pip install pypdf"
             )
         }
+
+
+def _read_pdf_pdfplumber(path: Path, pdfplumber) -> dict:
+    """Extract text + tables from PDF using pdfplumber (best quality)."""
+    try:
+        pages_text: list[str] = []
+        with pdfplumber.open(str(path)) as pdf:
+            num_pages = len(pdf.pages)
+            for page in pdf.pages:
+                parts: list[str] = []
+
+                # Extract tables first, render as markdown
+                tables_on_page = page.extract_tables() or []
+                # Track bounding boxes of extracted tables so we can exclude
+                # their text from the plain-text pass (avoid double-reading)
+                table_bboxes: list[tuple] = []
+                for table_obj in page.find_tables():
+                    table_bboxes.append(table_obj.bbox)  # (x0, top, x1, bottom)
+
+                # Page words not inside any table bbox
+                page_words = page.extract_words() or []
+                non_table_words = [
+                    w for w in page_words
+                    if not any(
+                        w["x0"] >= bbox[0] and w["top"] >= bbox[1]
+                        and w["x1"] <= bbox[2] and w["bottom"] <= bbox[3]
+                        for bbox in table_bboxes
+                    )
+                ]
+                # Re-assemble prose text from filtered words
+                prose = " ".join(w["text"] for w in non_table_words).strip()
+                if prose:
+                    parts.append(prose)
+
+                # Render each table as markdown
+                for rows in tables_on_page:
+                    if not rows:
+                        continue
+                    rows = [[cell or "" for cell in row] for row in rows]
+                    header = rows[0]
+                    md = (
+                        "| " + " | ".join(header) + " |\n"
+                        + "| " + " | ".join(["---"] * len(header)) + " |\n"
+                        + "\n".join(
+                            "| " + " | ".join(row[:len(header)]) + " |"
+                            for row in rows[1:]
+                        )
+                    )
+                    parts.append(md)
+
+                if parts:
+                    pages_text.append("\n\n".join(parts))
+
+        if not pages_text:
+            return {"error": "PDF produced no extractable text (may be image-only)"}
+        return {
+            "text": _normalise_pdf_text("\n\n".join(pages_text)),
+            "format": "pdf",
+            "pages": num_pages,
+            "reader": "pdfplumber",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"PDF read error (pdfplumber): {exc}"}
+
+
+def _read_pdf_pypdf(path: Path, pypdf) -> dict:
+    """Extract text from PDF using pypdf (text only, no table structure)."""
     try:
         reader = pypdf.PdfReader(str(path))
         pages: list[str] = []
@@ -107,9 +207,10 @@ def _read_pdf(path: Path) -> dict:
             "text": _normalise_pdf_text("\n\n".join(pages)),
             "format": "pdf",
             "pages": len(reader.pages),
+            "reader": "pypdf",
         }
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"PDF read error: {exc}"}
+        return {"error": f"PDF read error (pypdf): {exc}"}
 
 
 def _normalise_pdf_text(text: str) -> str:
@@ -164,10 +265,37 @@ def _docx_table_to_markdown(table) -> str:
     return "\n".join(lines)
 
 
+_WP_DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+_WP_DOCPR_TAG  = f"{{{_WP_DRAWING_NS}}}docPr"
+
+
+def _extract_image_alt_texts(element) -> list[str]:
+    """Return alt-text / title strings for any images embedded in this XML element.
+
+    DOCX stores image alt-text in <wp:docPr descr="..." title="..."/> inside
+    the paragraph that contains the drawing. No extra dependencies needed —
+    uses the lxml etree that python-docx already requires.
+    """
+    labels: list[str] = []
+    for doc_pr in element.iter(_WP_DOCPR_TAG):
+        descr = (doc_pr.get("descr") or "").strip()
+        title = (doc_pr.get("title") or "").strip()
+        label = descr or title
+        if label:
+            labels.append(label)
+    return labels
+
+
 def _read_docx(path: Path) -> dict:
+    """Read a DOCX file preserving document order: paragraphs, tables, and images.
+
+    - Paragraphs: rendered as plain text (Heading styles → markdown #)
+    - Tables: rendered as GitHub-flavoured markdown tables
+    - Images: alt-text / title extracted as [Image: description] markers
+      (no extra deps — uses DOCX XML attributes that Word writes by default)
+    """
     try:
         import docx  # type: ignore  (python-docx)
-        from docx.oxml.ns import qn  # type: ignore
     except ImportError:
         return {
             "error": (
@@ -188,6 +316,12 @@ def _read_docx(path: Path) -> dict:
         for child in doc.element.body:
             if child in para_map:
                 para = para_map[child]
+
+                # 1. Image alt-text (may coexist with or replace paragraph text)
+                for label in _extract_image_alt_texts(child):
+                    lines.append(f"[Image: {label}]")
+
+                # 2. Paragraph text
                 text = para.text.strip()
                 if not text:
                     continue
