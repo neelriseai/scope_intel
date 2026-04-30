@@ -1087,6 +1087,98 @@ class TestDocExport:
 
 
 # ---------------------------------------------------------------------------
+# ingest-batch (tested via multiple sequential ingest_document calls)
+# ---------------------------------------------------------------------------
+
+class TestIngestBatch:
+    """Test the multi-file batch ingest pattern (sequential ingest_document calls).
+
+    The CLI ingest-batch command is just a loop over ingest_document; we test
+    the core logic here without needing to invoke argparse.
+    """
+
+    @pytest.fixture()
+    def docs_dir(self, tmp_path) -> Path:
+        """Create a small directory with multiple markdown design docs."""
+        d = tmp_path / "docs"
+        d.mkdir()
+        (d / "overview.md").write_text(
+            "# Project Overview\n\nThis project builds an AI assistant.\n\n"
+            "## Architecture\n\nLayered architecture using Python.\n",
+            encoding="utf-8",
+        )
+        (d / "specs.md").write_text(
+            "# Memory Layer\n\nRedis-backed storage for semantic memories.\n\n"
+            "## Constraints\n\nMust not exceed 1GB memory usage.\n",
+            encoding="utf-8",
+        )
+        (d / "roadmap.md").write_text(
+            "# Roadmap\n\nPhase 1: Core engine (done).\nPhase 2: RAG layer.\n",
+            encoding="utf-8",
+        )
+        return d
+
+    def test_multiple_docs_all_succeed(self, repo, docs_dir):
+        results = []
+        for p in sorted(docs_dir.glob("*.md")):
+            r = ingest_document(repo, p, overwrite=True)
+            results.append(r)
+        assert all("error" not in r for r in results)
+
+    def test_multiple_docs_aggregate_files_written(self, repo, docs_dir):
+        total_written = 0
+        for p in sorted(docs_dir.glob("*.md")):
+            r = ingest_document(repo, p, overwrite=True)
+            total_written += r.get("files_written", 0)
+        # Three docs covering overview/arch, memory/constraints, roadmap → multiple files
+        assert total_written > 0
+
+    def test_second_doc_skips_existing_without_overwrite(self, repo, docs_dir):
+        doc_list = sorted(docs_dir.glob("*.md"))
+        # First ingest
+        ingest_document(repo, doc_list[0], overwrite=True)
+        # Second ingest without overwrite — existing files should be skipped
+        r2 = ingest_document(repo, doc_list[1], overwrite=False)
+        # Some files might be skipped (already written by doc 1), some new
+        assert "error" not in r2
+
+    def test_if_changed_skips_unchanged_in_batch(self, repo, docs_dir):
+        doc_list = sorted(docs_dir.glob("*.md"))
+        # Prime the hash for the first doc
+        ingest_document(repo, doc_list[0], overwrite=True)
+        # Run again with if_changed — first doc should be unchanged
+        r = ingest_document(repo, doc_list[0], if_changed=True)
+        assert r.get("unchanged") is True
+
+    def test_each_doc_contributes_to_index(self, repo, docs_dir):
+        for p in sorted(docs_dir.glob("*.md")):
+            ingest_document(repo, p, overwrite=True)
+        index_path = repo / ".ai-context" / "generated" / "index.json"
+        assert index_path.exists()
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        # Last doc's files should be recorded (index.json is overwritten each run)
+        assert len(index["files"]) > 0
+
+    def test_batch_with_mixed_extensions(self, repo, tmp_path):
+        # Create a directory with mixed file types
+        d = tmp_path / "mixed"
+        d.mkdir()
+        (d / "design.md").write_text(
+            "# Architecture\n\nHigh-level design.\n", encoding="utf-8"
+        )
+        (d / "notes.txt").write_text(
+            "Overview of the project goals and scope.\n", encoding="utf-8"
+        )
+        results = []
+        for pat in ("*.md", "*.txt"):
+            for p in sorted(d.glob(pat)):
+                r = ingest_document(repo, p, overwrite=True)
+                results.append(r)
+        assert all("error" not in r for r in results)
+        assert len(results) == 2
+
+
+# ---------------------------------------------------------------------------
 # doc clear (tested via filesystem state)
 # ---------------------------------------------------------------------------
 

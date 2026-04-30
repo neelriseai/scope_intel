@@ -249,6 +249,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show what would be removed without deleting anything.",
     )
 
+    # doc ingest-batch — ingest all docs in a directory
+    p_ibatch = doc_sub.add_parser(
+        "ingest-batch",
+        help="Ingest all design docs (PDF/DOCX/MD/TXT) in a directory.",
+    )
+    p_ibatch.add_argument("directory", help="Directory containing design documents.")
+    p_ibatch.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_ibatch.add_argument(
+        "--glob", default="*.pdf,*.docx,*.md,*.txt", metavar="PATTERNS",
+        help=(
+            "Comma-separated glob patterns to match (default: *.pdf,*.docx,*.md,*.txt). "
+            "Example: --glob '*.pdf,*.docx'"
+        ),
+    )
+    p_ibatch.add_argument(
+        "--overwrite", action="store_true",
+        help="Overwrite files that already exist (default: skip existing).",
+    )
+    p_ibatch.add_argument(
+        "--if-changed", action="store_true", dest="if_changed",
+        help="Skip individual files whose hash matches the stored hash.",
+    )
+    p_ibatch.add_argument(
+        "--mode", choices=["python", "llm"], default="python",
+        help="Extraction mode (default: python).",
+    )
+    p_ibatch.add_argument("--ollama-model", default="qwen2.5:14b", metavar="MODEL")
+    p_ibatch.add_argument("--ollama-url", default="http://localhost:11434", metavar="URL")
+    p_ibatch.add_argument("--no-claude-md", action="store_true")
+    p_ibatch.add_argument(
+        "--stop-on-error", action="store_true",
+        help="Abort the batch on the first ingest error (default: log and continue).",
+    )
+    p_ibatch.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc rebuild — clear generated/ then re-ingest
     p_rebuild = doc_sub.add_parser(
         "rebuild",
@@ -1217,6 +1252,32 @@ def _fmt_ingest(r: dict) -> None:
             print(f"  {trunc:<{col1}}  → {dr['dest']}{via_tag}{dr['hint_str']}")
 
 
+def _fmt_batch_ingest(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    total  = r.get("total_docs", 0)
+    done   = r.get("docs_ingested", 0)
+    skipped = r.get("docs_skipped_unchanged", 0)
+    errors = r.get("docs_errored", 0)
+    print(f"scope doc ingest-batch — {total} file(s) found")
+    print(f"  ingested:  {done}")
+    print(f"  unchanged: {skipped}  (--if-changed)")
+    print(f"  errors:    {errors}")
+    print(f"  files written total:   {r.get('total_files_written', 0)}")
+    print(f"  memories added total:  {r.get('total_memories_added', 0)}")
+    print(f"  templates created:     {r.get('total_templates_created', 0)}")
+    results = r.get("results", [])
+    if results:
+        print("\nper-document summary:")
+        for res in results:
+            src = Path(res.get("source", "?")).name
+            status = "skipped (unchanged)" if res.get("unchanged") else \
+                     f"error: {res.get('error')}" if "error" in res else \
+                     f"written={res.get('files_written', 0)}  " \
+                     f"memories={res.get('memories_added', 0)}"
+            print(f"  {src:<40} {status}")
+
+
 def _doc_list(repo: Path) -> dict:
     """Return manifest of .ai-context/ files for this repo.
 
@@ -1625,6 +1686,85 @@ def cmd_doc(args) -> int:
         )
         _emit(result, args.json, formatter=_fmt_ingest)
         return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "ingest-batch":
+        repo = _resolve_repo(args.repo)
+        if _not_indexed(repo):
+            return 2
+        batch_dir = Path(args.directory).resolve()
+        if not batch_dir.is_dir():
+            print(f"error: {batch_dir} is not a directory", file=sys.stderr)
+            return 2
+
+        # Collect matching files
+        patterns = [p.strip() for p in args.glob.split(",") if p.strip()]
+        doc_paths: list[Path] = []
+        seen: set[Path] = set()
+        for pat in patterns:
+            for p in sorted(batch_dir.glob(pat)):
+                if p.is_file() and p not in seen:
+                    seen.add(p)
+                    doc_paths.append(p)
+
+        if not doc_paths:
+            print(f"no files matching {args.glob!r} found in {batch_dir}", file=sys.stderr)
+            return 2
+
+        results: list[dict] = []
+        total_files_written   = 0
+        total_memories_added  = 0
+        total_templates       = 0
+        docs_ingested         = 0
+        docs_skipped          = 0
+        docs_errored          = 0
+
+        for doc_path in doc_paths:
+            if not args.json:
+                print(f"  → {doc_path.name} …", end=" ", flush=True)
+            res = ingest_document(
+                repo,
+                doc_path,
+                overwrite=args.overwrite,
+                dry_run=False,
+                update_claude_md=not args.no_claude_md,
+                mode=args.mode,
+                ollama_model=args.ollama_model,
+                ollama_url=args.ollama_url,
+                if_changed=args.if_changed,
+            )
+            results.append(res)
+
+            if "error" in res:
+                docs_errored += 1
+                if not args.json:
+                    print(f"ERROR: {res['error']}")
+                if args.stop_on_error:
+                    break
+            elif res.get("unchanged"):
+                docs_skipped += 1
+                if not args.json:
+                    print("unchanged")
+            else:
+                docs_ingested += 1
+                total_files_written  += res.get("files_written", 0)
+                total_memories_added += res.get("memories_added", 0)
+                total_templates      += len(res.get("templates_created", []))
+                if not args.json:
+                    print(f"✓  ({res.get('files_written',0)} files, "
+                          f"{res.get('memories_added',0)} memories)")
+
+        batch_result = {
+            "total_docs":              len(doc_paths),
+            "docs_ingested":           docs_ingested,
+            "docs_skipped_unchanged":  docs_skipped,
+            "docs_errored":            docs_errored,
+            "total_files_written":     total_files_written,
+            "total_memories_added":    total_memories_added,
+            "total_templates_created": total_templates,
+            "results":                 results,
+        }
+        _emit(batch_result, args.json, formatter=_fmt_batch_ingest)
+        return 0 if docs_errored == 0 else 1
 
     if args.doc_cmd == "rebuild":
         repo = _resolve_repo(args.repo)

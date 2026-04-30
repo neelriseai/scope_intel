@@ -408,6 +408,46 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_ingest_batch",
+        "description": (
+            "Ingest all design documents (PDF/DOCX/MD/TXT) in a directory, "
+            "one by one, accumulating sections into .ai-context/ files. "
+            "Returns per-file results and aggregated totals."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "directory": {
+                    "type": "string",
+                    "description": "Absolute path to the directory containing design docs.",
+                },
+                "glob": {
+                    "type": "string",
+                    "default": "*.pdf,*.docx,*.md,*.txt",
+                    "description": "Comma-separated glob patterns (default: *.pdf,*.docx,*.md,*.txt).",
+                },
+                "overwrite": {"type": "boolean", "default": False},
+                "if_changed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Skip files whose hash matches the stored hash.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["python", "llm"],
+                    "default": "python",
+                },
+                "stop_on_error": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Abort batch on first error (default: log and continue).",
+                },
+            },
+            "required": ["directory"],
+        },
+    },
+    {
         "name": "doc_stats",
         "description": (
             "Show character and estimated token counts for every .ai-context/ file. "
@@ -741,6 +781,56 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "files_with_matches": len(results),
             "total_matches": sum(r["match_count"] for r in results),
             "results": results,
+        }
+
+    if name == "doc_ingest_batch":
+        from .core.doc_ingestor import ingest_document as _ingest
+        batch_dir = Path(arguments["directory"]).resolve()
+        if not batch_dir.is_dir():
+            return {"error": f"not a directory: {batch_dir}"}
+        glob_str = arguments.get("glob", "*.pdf,*.docx,*.md,*.txt")
+        patterns = [p.strip() for p in glob_str.split(",") if p.strip()]
+        overwrite   = arguments.get("overwrite", False)
+        if_changed  = arguments.get("if_changed", False)
+        mode        = arguments.get("mode", "python")
+        stop_on_err = arguments.get("stop_on_error", False)
+
+        doc_paths: list[Path] = []
+        seen: set[Path] = set()
+        for pat in patterns:
+            for p in sorted(batch_dir.glob(pat)):
+                if p.is_file() and p not in seen:
+                    seen.add(p); doc_paths.append(p)
+
+        if not doc_paths:
+            return {"error": f"no files matching {glob_str!r} in {batch_dir}"}
+
+        results, total_written, total_mem, total_tmpl = [], 0, 0, 0
+        ingested = skipped = errored = 0
+        for doc_path in doc_paths:
+            res = _ingest(repo, doc_path, overwrite=overwrite,
+                          if_changed=if_changed, mode=mode)
+            results.append(res)
+            if "error" in res:
+                errored += 1
+                if stop_on_err:
+                    break
+            elif res.get("unchanged"):
+                skipped += 1
+            else:
+                ingested        += 1
+                total_written   += res.get("files_written", 0)
+                total_mem       += res.get("memories_added", 0)
+                total_tmpl      += len(res.get("templates_created", []))
+        return {
+            "total_docs":              len(doc_paths),
+            "docs_ingested":           ingested,
+            "docs_skipped_unchanged":  skipped,
+            "docs_errored":            errored,
+            "total_files_written":     total_written,
+            "total_memories_added":    total_mem,
+            "total_templates_created": total_tmpl,
+            "results":                 results,
         }
 
     if name == "doc_stats":
