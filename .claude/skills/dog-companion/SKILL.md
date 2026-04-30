@@ -11,6 +11,33 @@ status: candidate
 relates_to: nature-memory-framework, heron-stillness, crow-inference, elephant-memory, scope-intelligence-toolkit
 ---
 
+## The Sharpest Insight — The Sleeping Dog
+
+Before anything else: the most important thing about how a dog guards is not
+that it watches. It is that it **sleeps**.
+
+The dog follows its routine. It rests. It trusts the environment it knows.
+While sleeping, it does not scan for threats. It holds a **learned baseline**
+of its environment — the familiar smells, the regular sounds, the rhythm of the household —
+passively, at near-zero cost, through ambient sensing it doesn't even choose to do.
+
+When that baseline deviates — an unfamiliar smell, a sound that doesn't fit —
+the nervous system fires. The dog goes from deep sleep to full alert in an instant.
+Not because it was watching. Because it noticed the **difference**.
+
+This is not paranoid vigilance. It is **confident rest with passive baseline calibration**.
+The depth of the sleep is proof of the depth of the trust.
+
+**For AI systems: the watchdog is not a continuous monitor. It is a baseline holder that fires on deviation.**
+The system is at REST between deviations. Listeners — not polling loops — carry the ambient sensing.
+Most signals confirm: normal. Baseline strengthens. Dog stays asleep.
+One signal deviates: dog wakes, assesses, acts or returns to sleep.
+
+This is cheaper, more accurate, and philosophically correct.
+A system that is always scanning is not a dog — it is an anxious animal that never trusts.
+
+---
+
 ## The Philosophy — The Only Animal That Chose Us
 
 Every other animal in this framework evolved to survive in nature.
@@ -238,52 +265,171 @@ def decide_compliance(request: Request, trust_level: float) -> ComplianceDecisio
         return ComplianceDecision(execute=False, verify_intent=True)
 ```
 
-### 4. Watchdog — Anomaly Detection and Proactive Guarding
+### 4. The Sleeping Dog — Vigilance Without Paranoia
 
-The dog barks before you notice the stranger. It doesn't wait to be asked "is anything wrong?"
+This is the most important philosophical correction in this entire skill file.
+
+**Wrong model (what most people assume):**
+The dog is always alert, always watching, continuously scanning for threats.
+
+**Right model:**
+The dog sleeps. Fully. It trusts its environment enough to rest.
+But while it sleeps, its nervous system maintains a **learned baseline** of the environment —
+the familiar smells of the household, the rhythm of sounds, the ambient temperature,
+the regular patterns of who moves when.
+
+It is not watching. It is resting **within a known baseline**.
+
+When that baseline changes — the wrong smell enters, an unfamiliar sound,
+a pattern that doesn't fit — the nervous system fires.
+The dog goes from deep sleep to full alert in an instant.
+Not because it was watching. Because it noticed the **difference**.
+
+Then it assesses. Is this a real threat? If not: it settles back to sleep and the baseline updates.
+If yes: full execution. Bark, stand, guard.
+
+```
+Dog's actual vigilance architecture:
+  SLEEP (default, trusted, restful)
+    └── nervous system holds: environmental_baseline
+    └── ambient sensors: smell, vibration, infrasound — passive, no active scanning
+    └── cost: near zero
+    └── not watching → not tired → can sleep as long as needed
+
+  DEVIATION DETECTED (baseline_current ≠ environmental_baseline)
+    └── instant wakeup — milliseconds
+    └── assess: is this actually a threat?
+        ├── No → note deviation, update baseline, return to sleep
+        └── Yes → full alert: bark, stand, guard, protect
+```
+
+**The vigilance comes from TRUST, not from SUSPICION.**
+The dog sleeps because it trusts. If it didn't trust, it couldn't sleep — it would be anxious.
+The depth of the sleep is a measure of the strength of the trust.
+
+---
+
+### How This Differs From Every Other "Monitoring" Pattern
+
+```
+Heron:     Deliberate strategic stillness. Chosen attention. "I am watching, and I will act."
+           → Active, chosen, purposeful. Target is hidden and the heron is looking for it.
+
+Crow:      Surveillance of MEMORY — watching for data anomalies, confidence drops, conflicts.
+           → Active background process watching the knowledge base.
+
+Dog sleep: NOT watching anything. Resting in trust. Nervous system fires on environmental DEVIATION.
+           → Passive baseline calibration. Not scanning. Noticing change, not watching for it.
+```
+
+The dog doesn't look for threats. It learns normal. Then it notices when normal breaks.
+These are completely different cognitive architectures.
+
+---
+
+### 4. Watchdog — Baseline Deviation, Not Continuous Monitoring
 
 ```python
 class DogWatchdog:
     """
-    Continuous low-cost monitoring. Alerts proactively.
-    Not about memory anomalies (that's crow surveillance).
-    About USER-FACING anomalies: things that should concern the human.
+    NOT continuous monitoring — that's the wrong model.
+    
+    The dog sleeps. Its nervous system holds an environmental baseline.
+    This class fires ONLY when the baseline deviates.
+    Between deviations: does nothing. Costs nothing.
+    
+    The dog is at REST. This fires when rest should end.
     """
 
-    def watch(self, session: Session, user_profile: UserProfile) -> list[Alert]:
-        alerts = []
+    def __init__(self, user_profile: UserProfile):
+        # The learned baseline — built from past sessions
+        self.baseline = EnvironmentBaseline(
+            user_message_rhythm   = user_profile.typical_session_pattern,
+            memory_change_rate    = user_profile.typical_memory_delta_per_session,
+            topic_domain_fingerprint = user_profile.typical_topic_distribution,
+            mood_baseline         = user_profile.mood_baseline,
+            constraint_set        = user_profile.active_constraints,
+        )
+        self.sleeping = True  # default state: at rest
 
-        # User is about to make a decision that contradicts their own stated constraints
-        if self._detects_constraint_violation(session, user_profile):
-            alerts.append(Alert(
-                type="constraint-risk",
-                message="This approach conflicts with your constraint: [constraint]. Flag before proceeding?",
-                urgency="high"
-            ))
+    def on_signal(self, signal: EnvironmentSignal) -> Alert | None:
+        """
+        Called passively when any ambient signal arrives.
+        Most calls return None — no deviation, dog stays asleep.
+        """
+        deviation = self.baseline.measure_deviation(signal)
 
-        # User has been in a frustration spiral (3+ rephrases on same topic)
-        if self._detects_frustration_spiral(session):
-            alerts.append(Alert(
-                type="communication-failure",
-                message="I've rephrased this 3 times. Let me try a completely different approach.",
-                urgency="medium"
-            ))
+        if deviation < self.baseline.threshold:
+            # Normal. Baseline holds. Dog stays asleep.
+            self.baseline.reinforce(signal)  # familiar = baseline strengthens
+            return None
 
-        # User's mood has shifted significantly mid-session
-        if self._detects_mood_shift(session):
-            alerts.append(Alert(
-                type="state-change",
-                message=None,  # Don't announce — just adjust silently
-                action="recalibrate_response_style"
-            ))
+        # Deviation detected — dog wakes up
+        self.sleeping = False
+        assessment = self._assess(signal, deviation)
 
-        # Something in memory contradicts what the user is about to build
-        if self._detects_knowledge_gap_risk(session, user_profile):
-            alerts.append(Alert(
-                type="knowledge-risk",
-                message="Before you proceed: there's a recorded decision that affects this approach.",
-                urgency="medium"
-            ))
+        if assessment.is_real_threat:
+            return Alert(
+                type=assessment.type,
+                message=assessment.message,
+                urgency=assessment.urgency,
+            )
+        else:
+            # False alarm — update baseline, return to sleep
+            self.baseline.update(signal)  # incorporate new normal
+            self.sleeping = True
+            return None
+
+    def _assess(self, signal: EnvironmentSignal, deviation: float) -> Assessment:
+        """After waking: is this worth alerting the human about?"""
+
+        # User heading into a constraint violation
+        if signal.type == "query" and self._violates_constraint(signal):
+            return Assessment(True, "constraint-risk",
+                "This conflicts with your constraint: [X]. Worth flagging before proceeding.")
+
+        # Frustration spiral building (3+ rephrases, same gap)
+        if signal.type == "rephrase" and self._spiral_forming(signal):
+            return Assessment(True, "communication-failure",
+                "I've approached this 3 ways and it's not landing. Let me try differently.")
+
+        # Something changed in memory that contradicts active work
+        if signal.type == "memory_change" and self._contradicts_session(signal):
+            return Assessment(True, "knowledge-risk",
+                "A fact relevant to what you're building just changed. Worth checking.")
+
+        # Mood shifted significantly — silently recalibrate, no alert needed
+        if signal.type == "mood_shift":
+            return Assessment(False)  # not a real threat — false alarm, update baseline
+
+        return Assessment(False)
+```
+
+**The key architectural consequences of this model:**
+
+```
+WRONG architecture (always-on monitor):
+  while True:
+      scan_everything()       # expensive
+      check_for_anomalies()   # expensive
+      sleep(60)               # still burns cycles constantly
+
+RIGHT architecture (baseline deviation):
+  environmental_baseline = load_from_profile()
+  register_passive_listeners([
+      file_system_watcher,    # fires only on change
+      session_event_listener, # fires only on user action
+      memory_change_hook,     # fires only when memory writes
+  ])
+  # → system is at REST
+  # → listeners cost near nothing
+  # → deviation in any listener triggers assessment
+  # → assessment decides: alert or return to rest
+```
+
+The dog sleeps as long as the environment is normal.
+It wakes exactly when it should and not a moment before.
+This is not laziness. This is trust as an operational strategy.
 
         return alerts
 ```
