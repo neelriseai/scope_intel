@@ -285,11 +285,14 @@ TOOLS: list[dict] = [
         "name": "doc_ingest",
         "description": (
             "Parse a design document (PDF/DOCX/MD/TXT) and generate .ai-context/ files. "
-            "Produces: generated/ context docs, curated/ state files, "
+            "Produces: 16 generated/ context docs (001-project-overview … 009-schema-design, "
+            "mcp-contract, roadmap, claude-code-integration, symbol-schema), "
+            "3 curated/ state files (constraints, current-phase, module-map), "
             "mempalace semantic memories, and feature stubs. "
             "mode='python' uses fast regex routing (no LLM). "
             "mode='llm' uses Qwen/Ollama for per-chunk classification — "
-            "richer extraction, requires Ollama running at ollama_url."
+            "richer extraction, requires Ollama running at ollama_url. "
+            "second_pass=true adds a synthesis pass to generate module-map.md."
         ),
         "inputSchema": {
             "type": "object",

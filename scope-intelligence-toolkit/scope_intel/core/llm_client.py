@@ -49,6 +49,8 @@ _VALID_TARGETS = (
     "009-schema-design.md",
     "mcp-contract.md",
     "roadmap.md",
+    "claude-code-integration.md",
+    "symbol-schema.md",
     "constraints.md",
     "current-phase.md",
     "module-map.md",
@@ -59,7 +61,7 @@ _CHUNK_CLASSIFY_SCHEMA = """\
 {
   "section_title": "<concise title for this section>",
   "category": "<one of: overview|module|constraint|decision|flow|roadmap|schema|current|api|skip>",
-  "target_file": "<one of: 001-project-overview.md | 002-system-architecture.md | 003-deterministic-engine.md | 004-rag-layer.md | 005-memory-layer.md | 006-validation-engine.md | 007-skill-playbooks.md | 008-subagent-strategy.md | 009-schema-design.md | mcp-contract.md | roadmap.md | constraints.md | current-phase.md | module-map.md | skip>",
+  "target_file": "<one of: 001-project-overview.md | 002-system-architecture.md | 003-deterministic-engine.md | 004-rag-layer.md | 005-memory-layer.md | 006-validation-engine.md | 007-skill-playbooks.md | 008-subagent-strategy.md | 009-schema-design.md | mcp-contract.md | roadmap.md | claude-code-integration.md | symbol-schema.md | constraints.md | current-phase.md | module-map.md | skip>",
   "summary": "<1-2 sentence summary of what this section covers>",
   "tags": ["<tag1>", "<tag2>"],
   "importance": "<high | medium | low>",

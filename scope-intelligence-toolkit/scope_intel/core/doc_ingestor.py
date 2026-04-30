@@ -132,20 +132,22 @@ CURATED_ROUTES: list[tuple] = [
 
 # (dest_dir, numbered_prefix_or_None, slug)
 TARGET_FILE_MAP: dict[str, tuple] = {
-    "001-project-overview.md":     ("generated", "001", "project-overview"),
-    "002-system-architecture.md":  ("generated", "002", "system-architecture"),
-    "003-deterministic-engine.md": ("generated", "003", "deterministic-engine"),
-    "004-rag-layer.md":            ("generated", "004", "rag-layer"),
-    "005-memory-layer.md":         ("generated", "005", "memory-layer"),
-    "006-validation-engine.md":    ("generated", "006", "validation-engine"),
-    "007-skill-playbooks.md":      ("generated", "007", "skill-playbooks"),
-    "008-subagent-strategy.md":    ("generated", "008", "subagent-strategy"),
-    "009-schema-design.md":        ("generated", "009", "schema-design"),
-    "mcp-contract.md":             ("generated", None,  "mcp-contract"),
-    "roadmap.md":                  ("generated", None,  "roadmap"),
-    "constraints.md":              ("curated",   None,  "constraints"),
-    "current-phase.md":            ("curated",   None,  "current-phase"),
-    "module-map.md":               ("curated",   None,  "module-map"),
+    "001-project-overview.md":       ("generated", "001", "project-overview"),
+    "002-system-architecture.md":    ("generated", "002", "system-architecture"),
+    "003-deterministic-engine.md":   ("generated", "003", "deterministic-engine"),
+    "004-rag-layer.md":              ("generated", "004", "rag-layer"),
+    "005-memory-layer.md":           ("generated", "005", "memory-layer"),
+    "006-validation-engine.md":      ("generated", "006", "validation-engine"),
+    "007-skill-playbooks.md":        ("generated", "007", "skill-playbooks"),
+    "008-subagent-strategy.md":      ("generated", "008", "subagent-strategy"),
+    "009-schema-design.md":          ("generated", "009", "schema-design"),
+    "mcp-contract.md":               ("generated", None,  "mcp-contract"),
+    "roadmap.md":                    ("generated", None,  "roadmap"),
+    "claude-code-integration.md":    ("generated", None,  "claude-code-integration"),
+    "symbol-schema.md":              ("generated", None,  "symbol-schema"),
+    "constraints.md":                ("curated",   None,  "constraints"),
+    "current-phase.md":              ("curated",   None,  "current-phase"),
+    "module-map.md":                 ("curated",   None,  "module-map"),
 }
 
 
