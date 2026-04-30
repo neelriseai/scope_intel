@@ -337,6 +337,15 @@ def _split_sections(text: str) -> list[dict]:
     return sections
 
 
+# Route override comment — <!-- route: constraints --> in the section body
+# forces that section to go to the named target regardless of keyword routing.
+_ROUTE_OVERRIDE_RE = re.compile(r"<!--\s*route:\s*([\w-]+)\s*-->", re.I)
+
+# Build fast lookup tables from routes: slug → (dest_type, prefix, slug)
+_SLUG_TO_CURATED:   dict[str, tuple] = {slug: ("curated",   None,   slug) for _, slug in CURATED_ROUTES}
+_SLUG_TO_GENERATED: dict[str, tuple] = {slug: ("generated", prefix, slug) for _, prefix, slug in GENERATED_ROUTES}
+
+
 def _route_section(title: str, body_snippet: str) -> tuple[str | None, str | None, str | None]:
     """Decide where a section goes.
 
@@ -345,12 +354,24 @@ def _route_section(title: str, body_snippet: str) -> tuple[str | None, str | Non
       prefix    : '001' … '009' | None
       slug      : filename stem (without extension)
 
-    Curated routes are checked FIRST because they have very distinctive
-    heading names (Constraints, Module Map, Current Phase) and rarely
-    produce false positives.  Checking them first prevents generated routes
-    from stealing a "Constraints" section just because its body happens to
-    contain words like "validation" or "architecture".
+    Lookup order:
+      0. Explicit <!-- route: slug --> comment in body  (user override)
+      1. CURATED routes — distinctive headings, nearly zero false positives
+      2. GENERATED routes — keyword regex, specific patterns first
+
+    Curated routes checked before generated so a 'Constraints' section
+    whose body mentions 'validation' isn't stolen by the validation route.
     """
+    # 0. Manual override
+    m = _ROUTE_OVERRIDE_RE.search(body_snippet[:500])
+    if m:
+        target = m.group(1).lower()
+        if target in _SLUG_TO_CURATED:
+            return _SLUG_TO_CURATED[target]
+        if target in _SLUG_TO_GENERATED:
+            return _SLUG_TO_GENERATED[target]
+        # Unknown slug in override comment — fall through to normal routing
+
     combined = (title + " " + body_snippet[:300]).lower()
 
     # 1. Curated first — distinctive headings, nearly zero false positives
@@ -364,6 +385,36 @@ def _route_section(title: str, body_snippet: str) -> tuple[str | None, str | Non
             return "generated", prefix, slug
 
     return None, None, None
+
+
+def _suggest_route(title: str, body_snippet: str) -> str | None:
+    """For an unmatched section, find the closest route and return a hint.
+
+    Counts how many alternates in each route pattern word-match the combined
+    title+body text.  Returns a human-readable suggestion string or None.
+    """
+    combined = (title + " " + body_snippet[:300]).lower()
+    best_score = 0
+    best_hint: str | None = None
+
+    for pattern, _, slug in GENERATED_ROUTES:
+        alternates = [a.strip() for a in pattern.split(r"|")]
+        hits = sum(1 for a in alternates if re.search(a, combined, re.I))
+        if hits > best_score:
+            best_score = hits
+            # Pick first readable keyword (strip regex anchors)
+            kw = re.sub(r"\\b|\\.|\^|\$|\(|\)", "", alternates[0]).strip()
+            best_hint = f"add '{kw}' to the heading → routes to {slug}.md"
+
+    for pattern, slug in CURATED_ROUTES:
+        alternates = [a.strip() for a in pattern.split(r"|")]
+        hits = sum(1 for a in alternates if re.search(a, combined, re.I))
+        if hits > best_score:
+            best_score = hits
+            kw = re.sub(r"\\b|\\.|\^|\$|\(|\)", "", alternates[0]).strip()
+            best_hint = f"add '{kw}' to the heading → routes to curated/{slug}.md"
+
+    return best_hint if best_score > 0 else None
 
 
 # ---------------------------------------------------------------------------
@@ -564,11 +615,13 @@ def _ingest_with_llm(
             else:
                 if chunk["title"] and chunk["title"] != "(preamble)":
                     unmatched.append(chunk["title"])
+                    hint = _suggest_route(chunk["title"], chunk.get("text", ""))
                     routing_table.append({
                         "section": chunk["title"],
                         "file":    None,
                         "layer":   None,
                         "via":     "llm" if classification else "fallback",
+                        "hint":    hint,
                     })
                 continue
 
@@ -923,11 +976,13 @@ def _ingest_python_only(
             else:
                 if s["title"] != "(preamble)" and s.get("body_text"):
                     unmatched.append(s["title"])
+                    hint = _suggest_route(s["title"], s.get("body_text", ""))
                     routing_table.append({
                         "section": s["title"],
                         "level":   s.get("level", 1),
                         "file":    None,
                         "layer":   None,
+                        "hint":    hint,
                     })
                 continue
         filename = (f"{prefix}-{slug}.md" if prefix else f"{slug}.md")

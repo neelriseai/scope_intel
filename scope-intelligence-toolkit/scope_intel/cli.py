@@ -1161,33 +1161,38 @@ def _fmt_ingest(r: dict) -> None:
     # Routing table — shown in dry-run mode to let users debug section routing
     rt = r.get("routing_table", [])
     if r.get("dry_run") and rt:
-        # Deduplicate: show each (section→file) pair once
+        # Deduplicate: show each (section→file) pair once; build display rows first
         seen_rt: set[tuple] = set()
-        rows: list[tuple[str, str, str]] = []
+        disp_rows: list[dict] = []
         for entry in rt:
             key = (entry["section"], entry.get("file") or "")
             if key in seen_rt:
                 continue
             seen_rt.add(key)
-            section = entry["section"]
-            layer   = entry.get("layer") or ""
-            f       = entry.get("file")
+            lyr = entry.get("layer") or ""
+            f   = entry.get("file")
             if f:
-                layer_tag = f"[{layer}]" if layer else ""
-                dest = f"{layer_tag} {f}"
+                dest = f"[{lyr}] {f}" if lyr else f
+                hint_str = ""
             else:
                 dest = "⚠ (unmatched)"
-            rows.append((section, dest, entry.get("via", "")))
+                hint = entry.get("hint")
+                hint_str = f"  💡 {hint}" if hint else ""
+            disp_rows.append({
+                "section":  entry["section"],
+                "dest":     dest,
+                "via":      entry.get("via", ""),
+                "hint_str": hint_str,
+            })
 
-        col1 = max((len(r[0]) for r in rows), default=7)
-        col1 = min(col1, 50)
-        print(f"\nrouting table ({len(rows)} sections):")
+        col1 = min(max((len(dr["section"]) for dr in disp_rows), default=7), 50)
+        print(f"\nrouting table ({len(disp_rows)} sections):")
         print(f"  {'section':<{col1}}  {'→ output file'}")
         print(f"  {'─'*col1}  {'─'*40}")
-        for section, dest, via in rows:
-            trunc = section[:col1]
-            via_tag = f"  (via {via})" if via else ""
-            print(f"  {trunc:<{col1}}  → {dest}{via_tag}")
+        for dr in disp_rows:
+            via_tag = f"  (via {dr['via']})" if dr["via"] else ""
+            trunc   = dr["section"][:col1]
+            print(f"  {trunc:<{col1}}  → {dr['dest']}{via_tag}{dr['hint_str']}")
 
 
 def _doc_list(repo: Path) -> dict:

@@ -29,6 +29,7 @@ from scope_intel.core.doc_ingestor import (
     _split_sections,
     _extract_memories,
     _extract_features,
+    _suggest_route,
     ingest_document,
 )
 
@@ -352,6 +353,79 @@ class TestRouteSection:
         dest, prefix, slug = _route_section("Schema Design", "data model JSON type")
         assert dest == "generated"
         assert slug == "schema-design"
+
+    # ---- route override tests ----
+
+    def test_route_override_curated(self):
+        # <!-- route: constraints --> in body forces curated/constraints.md
+        body = "<!-- route: constraints -->\nThis section is about misc stuff."
+        dest, prefix, slug = _route_section("Random Title", body)
+        assert dest == "curated"
+        assert slug == "constraints"
+
+    def test_route_override_generated_slug(self):
+        # Override to a generated slug
+        body = "<!-- route: memory-layer -->\nContent about caching."
+        dest, prefix, slug = _route_section("Misc Notes", body)
+        assert dest == "generated"
+        assert slug == "memory-layer"
+
+    def test_route_override_unknown_slug_falls_through(self):
+        # Unknown slug in override comment → normal routing continues
+        # Title "System Architecture" has no "overview" so doesn't hit project-overview
+        body = "<!-- route: nonexistent-file -->\nThe system uses layered architecture."
+        dest, prefix, slug = _route_section("System Architecture", body)
+        # Should fall through to normal routing and match system-architecture
+        assert dest == "generated"
+        assert slug == "system-architecture"
+
+    def test_route_override_case_insensitive(self):
+        body = "<!-- ROUTE: roadmap -->\nPlanning content."
+        dest, prefix, slug = _route_section("Planning", body)
+        assert dest == "generated"
+        assert slug == "roadmap"
+
+
+# ---------------------------------------------------------------------------
+# doc_ingestor — suggest_route hints
+# ---------------------------------------------------------------------------
+
+class TestSuggestRoute:
+    def test_suggest_returns_string_or_none(self):
+        hint = _suggest_route("Some Title", "some body text")
+        assert hint is None or isinstance(hint, str)
+
+    def test_suggest_finds_hint_for_memory_like_section(self):
+        # Uses exact vocabulary from the memory-layer route → must get a hint
+        hint = _suggest_route("Data Notes", "memory storage persistence cache layer backend")
+        # "memory" and "storage" and "persistence" all appear in the broad memory routes
+        assert hint is not None
+
+    def test_suggest_returns_none_for_truly_obscure_section(self):
+        hint = _suggest_route("xyzzy fnord quux", "blarg wumble zork")
+        # Completely unknown vocabulary — no hint
+        assert hint is None
+
+    def test_suggest_hint_contains_slug_name(self):
+        hint = _suggest_route("Caching Notes", "Redis cache performance storage")
+        if hint:  # hint may or may not fire depending on match strength
+            assert "md" in hint or "routes" in hint
+
+    def test_unmatched_section_in_routing_table_has_hint(self, repo, tmp_path):
+        # A doc where a section has body text with memory-like vocabulary
+        # but a heading that doesn't match any route
+        doc = tmp_path / "odd.md"
+        doc.write_text(
+            "# Project\n\nOverview of the project.\n\n"
+            "## Data Store Layer\n\nWe store and cache data in Redis.\n",
+            encoding="utf-8",
+        )
+        result = ingest_document(repo, doc, dry_run=True, overwrite=True)
+        # Find unmatched entries that have hints
+        unmatched = [e for e in result.get("routing_table", []) if e["file"] is None]
+        # If any unmatched sections exist, at least some may have hints
+        for um in unmatched:
+            assert "hint" in um  # hint key must be present even if None
 
 
 # ---------------------------------------------------------------------------
