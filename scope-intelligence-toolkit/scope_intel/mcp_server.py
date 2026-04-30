@@ -342,6 +342,41 @@ TOOLS: list[dict] = [
             "required": ["doc"],
         },
     },
+    {
+        "name": "doc_list",
+        "description": (
+            "List all .ai-context/ files generated for this repo — "
+            "generated/ docs (numbered architecture files + named extras) "
+            "and curated/ state files (constraints, current-phase, module-map). "
+            "Returns source document name, generation timestamp, and mode used."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": _REPO_PROP,
+        },
+    },
+    {
+        "name": "doc_fetch",
+        "description": (
+            "Retrieve the full markdown content of a specific .ai-context/ file "
+            "by id or partial name. Examples: 'overview', '002', 'constraints', "
+            "'memory'. Returns file content, path, and layer (generated | curated)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "File id or partial name to match against .ai-context/ files. "
+                        "Use doc_list to see available ids."
+                    ),
+                },
+            },
+            "required": ["name"],
+        },
+    },
     # --- Phase 5 tools ---
     {
         "name": "mem_auto_capture",
@@ -518,7 +553,7 @@ def _call_tool(name: str, arguments: dict) -> dict:
     if name == "mem_churn":
         return compute_churn(repo, days=arguments.get("days", 90))
 
-    # --- Doc ingest ---
+    # --- Doc ingest / list / fetch ---
     if name == "doc_ingest":
         from .core.doc_ingestor import ingest_document
         return ingest_document(
@@ -532,6 +567,68 @@ def _call_tool(name: str, arguments: dict) -> dict:
             second_pass=arguments.get("second_pass", False),
             update_claude_md=arguments.get("update_claude_md", True),
         )
+    if name == "doc_list":
+        import json as _json
+        index_path = repo / ".ai-context" / "generated" / "index.json"
+        if not index_path.exists():
+            return {"error": "no .ai-context/ found — run doc_ingest first"}
+        index = _json.loads(index_path.read_text(encoding="utf-8"))
+        curated_dir = repo / ".ai-context" / "curated"
+        curated = []
+        if curated_dir.exists():
+            for p in sorted(curated_dir.glob("*.md")):
+                curated.append({
+                    "id":    p.stem,
+                    "path":  str(p.relative_to(repo)).replace("\\", "/"),
+                    "layer": "curated",
+                })
+        return {
+            "source":       index.get("source", "?"),
+            "generated_at": index.get("generated_at", "?"),
+            "mode":         index.get("mode", "?"),
+            "generated":    index.get("files", []),
+            "curated":      curated,
+            "total":        len(index.get("files", [])) + len(curated),
+        }
+    if name == "doc_fetch":
+        import json as _json
+        query = arguments["name"].lower()
+        index_path = repo / ".ai-context" / "generated" / "index.json"
+        candidates = []
+        seen_paths: set = set()
+        def _add_candidate(entry):
+            p = entry.get("path", "")
+            if p not in seen_paths:
+                seen_paths.add(p)
+                candidates.append(entry)
+        if index_path.exists():
+            index = _json.loads(index_path.read_text(encoding="utf-8"))
+            for f in index.get("files", []):
+                if query in f["id"].lower() or query in f.get("title", "").lower():
+                    _add_candidate(f)
+        curated_dir = repo / ".ai-context" / "curated"
+        if curated_dir.exists():
+            for p in curated_dir.glob("*.md"):
+                if query in p.stem.lower():
+                    _add_candidate({
+                        "id":    p.stem,
+                        "path":  str(p.relative_to(repo)).replace("\\", "/"),
+                        "title": p.stem.replace("-", " ").title(),
+                        "layer": "curated",
+                    })
+        if not candidates:
+            return {"error": f"no file matching '{arguments['name']}'"}
+        if len(candidates) > 1:
+            return {"error": f"ambiguous: matches {[c['id'] for c in candidates]}"}
+        hit = candidates[0]
+        fp = repo / hit["path"]
+        if not fp.exists():
+            return {"error": f"file not found on disk: {fp}"}
+        content = fp.read_text(encoding="utf-8")
+        return {"id": hit["id"], "path": hit["path"],
+                "title": hit.get("title", hit["id"]),
+                "layer": hit.get("layer", "generated"),
+                "content": content, "chars": len(content)}
 
     # --- Phase 5 ---
     if name == "mem_auto_capture":

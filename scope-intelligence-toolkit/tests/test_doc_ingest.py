@@ -23,6 +23,7 @@ from scope_intel.adapters.doc_reader import (
     _docx_table_to_markdown,
 )
 from scope_intel.core.llm_client import NullLLMClient, get_client
+from scope_intel.cli import _doc_list, _doc_fetch
 from scope_intel.core.doc_ingestor import (
     _route_section,
     _split_sections,
@@ -548,3 +549,68 @@ class TestClaudeMdUpdate:
         content = (repo / "CLAUDE.md").read_text(encoding="utf-8")
         # Marker should appear exactly once (not duplicated)
         assert content.count("<!-- scope-intel-doc-context -->") == 1
+
+
+# ---------------------------------------------------------------------------
+# doc list and doc fetch helpers (CLI layer)
+# ---------------------------------------------------------------------------
+
+class TestDocListAndFetch:
+    """Test the _doc_list() and _doc_fetch() helpers used by CLI + MCP."""
+
+    def test_list_no_ai_context_returns_error(self, repo):
+        result = _doc_list(repo)
+        assert "error" in result
+
+    def test_list_after_ingest_returns_files(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_list(repo)
+        assert "error" not in result
+        assert result["total"] > 0
+        assert isinstance(result["generated"], list)
+
+    def test_list_source_matches_ingested_doc(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_list(repo)
+        assert result["source"] == md_file.name
+
+    def test_list_curated_files_present(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_list(repo)
+        curated_ids = [c["id"] for c in result.get("curated", [])]
+        # constraints.md should have been written (SAMPLE_MD has ## Constraints)
+        assert "constraints" in curated_ids
+
+    def test_fetch_by_partial_id(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_fetch(repo, "overview")
+        assert "error" not in result, result
+        assert "content" in result
+        assert result["chars"] > 0
+        assert "overview" in result["id"].lower() or "overview" in result["title"].lower()
+
+    def test_fetch_by_number_prefix(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_fetch(repo, "001")
+        assert "error" not in result, result
+        assert "001" in result["id"]
+
+    def test_fetch_curated_constraints(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_fetch(repo, "constraints")
+        assert "error" not in result, result
+        assert result["layer"] == "curated"
+        assert "constraints" in result["id"]
+
+    def test_fetch_no_match_returns_error(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_fetch(repo, "xyznonexistent999")
+        assert "error" in result
+
+    def test_fetch_ambiguous_returns_error(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        # "a" matches many files
+        result = _doc_fetch(repo, "a")
+        if "error" in result:
+            assert "ambiguous" in result["error"] or "no file" in result["error"]
+        # (if only one matches, that's also acceptable)

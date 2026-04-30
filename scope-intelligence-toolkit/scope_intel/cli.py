@@ -204,6 +204,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ingest.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc list — show what's been generated
+    p_list = doc_sub.add_parser(
+        "list",
+        help="List all .ai-context/ files generated for this repo.",
+    )
+    p_list.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_list.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
+    # doc fetch — retrieve content of a generated file
+    p_fetch = doc_sub.add_parser(
+        "fetch",
+        help="Print the content of a generated .ai-context/ file.",
+    )
+    p_fetch.add_argument(
+        "name",
+        help=(
+            "File id or partial name, e.g. 'overview', '001', 'constraints'. "
+            "Matched against file ids in .ai-context/generated/index.json."
+        ),
+    )
+    p_fetch.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_fetch.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # mem — MemPalace long-term memory
     p_mem = sub.add_parser("mem", help="MemPalace: long-term knowledge store.")
     mem_sub = p_mem.add_subparsers(dest="mem_cmd", required=True)
@@ -1059,6 +1082,122 @@ def _fmt_ingest(r: dict) -> None:
             print(f"  ... +{len(r['unmatched_sections']) - 10} more")
 
 
+def _doc_list(repo: Path) -> dict:
+    """Return manifest of .ai-context/ files for this repo."""
+    index_path = repo / ".ai-context" / "generated" / "index.json"
+    if not index_path.exists():
+        return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"index.json unreadable: {exc}"}
+
+    curated_dir = repo / ".ai-context" / "curated"
+    curated: list[dict] = []
+    if curated_dir.exists():
+        for p in sorted(curated_dir.glob("*.md")):
+            rel = str(p.relative_to(repo)).replace("\\", "/")
+            curated.append({"id": p.stem, "path": rel, "layer": "curated"})
+
+    return {
+        "source":      index.get("source", "?"),
+        "generated_at": index.get("generated_at", "?"),
+        "mode":        index.get("mode", "?"),
+        "generated":   index.get("files", []),
+        "curated":     curated,
+        "total":       len(index.get("files", [])) + len(curated),
+    }
+
+
+def _fmt_doc_list(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    print(f"AI context files — {r['total']} total  "
+          f"(source: {r['source']}  mode: {r['mode']}  at: {r['generated_at']})")
+    if r.get("generated"):
+        print("\ngenerated/")
+        for f in r["generated"]:
+            print(f"  {f['id']:<35} {f.get('title','')}")
+    if r.get("curated"):
+        print("\ncurated/")
+        for f in r["curated"]:
+            print(f"  {f['id']}")
+
+
+def _doc_fetch(repo: Path, name: str) -> dict:
+    """Retrieve content of a generated .ai-context/ file by id or partial name.
+
+    Searches generated/ files first (via index.json), then curated/ files.
+    Deduplicates by path so index.json entries and glob results for the same
+    file are not double-counted.
+    """
+    index_path = repo / ".ai-context" / "generated" / "index.json"
+    curated_dir = repo / ".ai-context" / "curated"
+
+    candidates: list[dict] = []
+    seen_paths: set[str] = set()
+
+    def _add(entry: dict) -> None:
+        p = entry.get("path", "")
+        if p not in seen_paths:
+            seen_paths.add(p)
+            candidates.append(entry)
+
+    q = name.lower()
+
+    # Search generated files via index.json
+    if index_path.exists():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            for f in index.get("files", []):
+                if q in f["id"].lower() or q in f.get("title", "").lower():
+                    _add(f)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Search curated via filesystem (curated files may not be in index.json)
+    if curated_dir.exists():
+        for p in curated_dir.glob("*.md"):
+            if q in p.stem.lower():
+                rel = str(p.relative_to(repo)).replace("\\", "/")
+                _add({
+                    "id":    p.stem,
+                    "path":  rel,
+                    "title": p.stem.replace("-", " ").title(),
+                    "layer": "curated",
+                })
+
+    if not candidates:
+        return {"error": f"no .ai-context/ file matching '{name}' — run `scope doc list`"}
+    if len(candidates) > 1:
+        ids = [c["id"] for c in candidates]
+        return {"error": f"ambiguous: '{name}' matches {ids} — be more specific"}
+
+    hit = candidates[0]
+    file_path = repo / hit["path"]
+    if not file_path.exists():
+        return {"error": f"file on record but not found on disk: {file_path}"}
+
+    content = file_path.read_text(encoding="utf-8")
+    return {
+        "id":      hit["id"],
+        "path":    hit["path"],
+        "title":   hit.get("title", hit["id"]),
+        "layer":   hit.get("layer", "generated"),
+        "content": content,
+        "chars":   len(content),
+    }
+
+
+def _fmt_doc_fetch(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    print(f"# {r['title']}  [{r['layer']}]  ({r['chars']} chars)")
+    print(f"# path: {r['path']}")
+    print()
+    print(r["content"])
+
+
 def cmd_doc(args) -> int:
     if args.doc_cmd == "ingest":
         repo = _resolve_repo(args.repo)
@@ -1076,6 +1215,18 @@ def cmd_doc(args) -> int:
             second_pass=args.second_pass,
         )
         _emit(result, args.json, formatter=_fmt_ingest)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "list":
+        repo = _resolve_repo(args.repo)
+        result = _doc_list(repo)
+        _emit(result, args.json, formatter=_fmt_doc_list)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "fetch":
+        repo = _resolve_repo(args.repo)
+        result = _doc_fetch(repo, args.name)
+        _emit(result, args.json, formatter=_fmt_doc_fetch)
         return 0 if "error" not in result else 2
 
     print(f"unknown doc subcommand: {args.doc_cmd}", file=sys.stderr)
