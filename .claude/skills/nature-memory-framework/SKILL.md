@@ -14,16 +14,11 @@ relates_to: elephant-memory, episodic-memory, scope-intelligence-toolkit
 Before mapping animals to software, understand what each animal is *famous for* and *why*.
 The philosophy is the lesson. The biology is the proof.
 
-### 🐴 Horse — The Prey Animal's Intelligence
-Famous for: hyper-vigilance, reading emotional tension, social synchronization, herd coordination.
-The horse is the ONLY animal in this framework shaped entirely by being prey.
-Its entire nervous system architecture exists to avoid being caught off guard.
-It sees ~350° simultaneously without choosing where to look. It reacts before it reasons —
-body moves first, cortex catches up. Its nervous system literally couples to nearby emotional states
-(handler heart rates synchronize). Safety memory is contextual, not categorical.
-**Philosophy: recall over precision. False positives are acceptable. False negatives are death.**
-The horse layer fires before reasoning begins — constitutional limits that cannot be argued around.
-In a multi-agent herd, one agent's alert elevates the whole system's vigilance.
+### 🐴 Horse — Two Faces: Prey Animal + Hayagriva
+Famous for: power, intuition, hyper-vigilance, and in Vedic tradition — Hayagriva, the horse-headed deity who protects the Vedas, the source code of the universe.
+**Biological face:** The only animal here shaped entirely by being prey. Sees ~350° simultaneously. Reacts before reasoning — body moves first, cortex catches up. Nervous system couples to nearby emotional states. Safety memory is contextual, not categorical. False positives are acceptable. False negatives are death. Constitutional limits fire before reasoning.
+**Hayagriva face:** Pure intelligence where knowledge is not reasoned — it flows to focused attention. The collective mind has access to facts as they are in reality. Individual memory is derived and can be broken. Hayagriva protects the Vedas — foundational knowledge that is true by definition, not by observation. When derived knowledge contradicts foundational truth, foundational truth wins. Convergence of independent paths without communication = intuition signal.
+**Philosophy: two modes of knowing that bypass reasoning — the body (somatic) and the collective mind (pure recognition). Both fire before the reasoning pipeline. Both protect what reasoning cannot protect.**
 
 ### 🐕 Dog — The Human-Aligned Companion
 Famous for: loyalty, reading human emotion, role memory, never forgetting its handler.

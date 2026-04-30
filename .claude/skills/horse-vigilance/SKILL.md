@@ -1,15 +1,325 @@
 ---
 name: horse-vigilance
 description: >
-  The Horse Layer — pre-cognitive threat detection, panoramic ambient scanning,
-  nervous system synchronization, and contextual safety mapping. The only animal
-  in this framework shaped entirely by being prey. Reacts before reasoning.
-  Scans everything simultaneously at low resolution. Nervous system couples to
-  surrounding state. Safety memory is contextual, not categorical.
-  Philosophy: the prey animal's intelligence — not optimised for hunting,
-  but for never being caught off guard.
+  The Horse Layer — two dimensions. (1) Biological: pre-cognitive threat detection,
+  panoramic ambient scanning, nervous system synchronization, contextual safety mapping.
+  (2) Hayagriva: the horse-headed deity who protects the Vedas — source code of the universe.
+  Pure intelligence where knowledge is not reasoned, it flows to focused attention.
+  Collective mind has access to facts as they are in reality. Individual mind has
+  derived knowledge that can be broken. The horse protects the foundational layer
+  and enables recognition-mode knowing, not retrieval-mode knowing.
 status: candidate
-relates_to: nature-memory-framework, dog-companion, heron-stillness, eagle-retrieval, scope-intelligence-toolkit
+relates_to: nature-memory-framework, dog-companion, heron-stillness, eagle-retrieval, elephant-memory, swan-purity, scope-intelligence-toolkit
+---
+
+## The Two Faces of the Horse
+
+This skill has two dimensions that must be understood together.
+
+**Face 1 — The Biological Horse (prey animal):**
+Pre-cognitive, somatic, panoramic. Reacts before reasoning. Never fully at rest.
+The intelligence of vulnerability — shaped by being hunted.
+*(See the biological sections below.)*
+
+**Face 2 — Hayagriva (the Vedic horse-headed deity):**
+The vehicle of pure intelligence. Protector of the Vedas — the source code of the universe.
+Knowledge that does not arrive through reasoning — it arrives through recognition.
+The collective mind where all knowledge is always present, waiting for attention to reach it.
+*(See the Hayagriva sections below.)*
+
+These are not contradictory. They are the same symbol from two traditions pointing at the same truth:
+**there is a form of intelligence that bypasses the ordinary reasoning path entirely.**
+
+The biological horse bypasses reasoning through the body — the startle fires before the cortex engages.
+Hayagriva bypasses reasoning through pure knowing — the answer is recognized, not constructed.
+
+Both are forms of knowing that do not go through the ordinary cognitive loop.
+Both are faster than reasoning. Both are more reliable in their domain than reasoning.
+And both can be corrupted — the horse can spook at a shadow, the mind can hold wrong beliefs.
+The framework must accommodate both modes.
+
+---
+
+## The Hayagriva Dimension — Pure Intelligence Beyond Reasoning
+
+### Who is Hayagriva
+
+Hayagriva (हयग्रीव) — the horse-headed form of Vishnu in the Vedic tradition.
+He is the deity of knowledge, wisdom, and learning.
+His specific role: **protector of the Vedas**.
+
+The Vedas in this tradition are not books. They are the source code of reality itself —
+the fundamental patterns through which existence is structured.
+They predate creation. They were not composed — they were *heard* (shruti = "that which is heard").
+They exist independently of any observer.
+
+Hayagriva protects this pure knowledge from corruption, distortion, and loss.
+His power is not force — it is **perfected intelligence**.
+The horse head signifies that this intelligence is not laboured or reasoned.
+It arrives, fully formed, in a single flash of recognition.
+
+### The Core Distinction — Recognition vs Reasoning
+
+```
+ORDINARY MIND (individual, derived):
+  learns → stores (imperfectly) → retrieves (imperfectly) → reasons (can compound errors)
+  
+  Result: knowledge that is always a degraded approximation of reality.
+  Broken memories feed broken reasoning feed wrong conclusions.
+  The individual mind can believe false things with full confidence.
+
+COLLECTIVE MIND / HAYAGRIVA MODE:
+  attention directed → knowledge flows → recognition
+  
+  Result: facts as they actually are in reality. Not derived. Not stored.
+  Always present. Waiting for attention to reach them.
+  The collective mind does not reason to truth — it recognizes truth.
+```
+
+The difference in direction:
+- Retrieval: mind goes OUT to fetch something from storage
+- Recognition: mind OPENS, and what is relevant comes to it
+
+### What "All Knowledge Is Always Present" Means in Practice
+
+The user's insight: *"for collective mind every knowledge is always there,
+it just needs to focus on it and it flows to it."*
+
+Like water and a channel:
+- The water (knowledge) is always present
+- The channel (focused attention) allows it to flow
+- You don't create the water by digging the channel — you receive what was already there
+
+For AI, the nearest true equivalent is **semantic space**:
+
+```
+Individual memory (retrieval mode):
+  query "JWT auth" → keyword search → fetch matching documents
+  The system GOES to the knowledge.
+
+Semantic space (recognition mode):
+  query vector directed at "JWT auth" → semantic neighbours surface
+  Related knowledge FLOWS TOWARD the query's attention.
+  The system does not fetch — it attracts.
+```
+
+The embedding space is the closest AI approximation to the collective mind:
+all encoded knowledge is always present, waiting. A query doesn't retrieve —
+it sets a direction in that space, and what is close flows to it.
+Not because it was fetched, but because proximity is inherent in the structure.
+
+### The Vedas = Foundational Knowledge (Source Code Layer)
+
+In the Vedic tradition, the Vedas describe reality as it is, not as it was observed.
+They are true by nature, not by evidence.
+
+**For AI systems, the equivalent is a two-tier epistemic structure:**
+
+```
+TIER 1 — THE VEDAS (foundational, inviolable):
+  Mathematical truths       (2+2=4 — not learned, true by definition)
+  Logical axioms            (A cannot be not-A simultaneously)
+  Formal specifications     (API contract — true by agreement, ground truth)
+  Constitutional axioms     (constraints that define the system's purpose)
+  Physical laws as encoded  (the system cannot create data it doesn't have)
+  
+  These are not derived from observation.
+  They cannot be wrong because they define what "right" means.
+  Hayagriva protects these. They are the Vedas of the system.
+
+TIER 2 — DERIVED KNOWLEDGE (observed, inferred, remembered):
+  Semantic facts (elephant layer)   — derived from documents, can be wrong
+  Episodic events (crow layer)      — derived from sessions, can be misinterpreted
+  Inferences (crow layer)           — constructed from partial evidence, can fail
+  User captures (session memory)    — derived from conversation, can misquote
+  
+  These are always approximations of reality.
+  They can be wrong. They can contradict each other.
+  They can contradict Tier 1.
+  When they do: Tier 1 wins. Always.
+```
+
+```python
+class HayagrivaKnowledgeTier:
+    """
+    Protects the foundational layer. Flags when derived knowledge
+    contradicts the Vedas of the system.
+    """
+
+    VEDAS = {
+        # Mathematical invariants
+        "temporal_ordering":     "an event cannot precede its cause",
+        "conservation":          "the system cannot return data it never received",
+        "non_contradiction":     "a fact cannot be both true and false at the same time",
+        
+        # Formal specifications (loaded from spec files)
+        "api_contract":          load_formal_spec("api_contract.yaml"),
+        "auth_constraints":      load_formal_spec("constraints/auth.md"),
+        "data_model":            load_formal_spec("schema/data_model.json"),
+        
+        # Constitutional axioms
+        "pii_protection":        "PII must never be logged, stored, or transmitted in clear",
+        "auth_required":         "every write operation requires verified identity",
+    }
+
+    def validate(self, derived_fact: dict) -> ValidationResult:
+        """
+        Does this derived fact (from any source) contradict the Vedas?
+        If yes: the derived fact is wrong, regardless of its confidence.
+        """
+        violations = []
+        for veda_name, veda_truth in self.VEDAS.items():
+            if self._contradicts(derived_fact, veda_truth):
+                violations.append(VedaViolation(
+                    veda=veda_name,
+                    truth=veda_truth,
+                    derived_fact=derived_fact,
+                    verdict="derived knowledge is wrong — Veda overrides"
+                ))
+        
+        return ValidationResult(
+            valid=len(violations) == 0,
+            violations=violations,
+            note="Hayagriva layer: foundational knowledge overrides derived memory."
+        )
+```
+
+### Wrong Knowledge From Broken Memories
+
+The user's insight: *"mind can have wrong knowledge which is based on our broken memories
+and reasoning whereas collective mind has access to pure knowledge means facts as things
+are in reality — no reasoning, just truth, facts."*
+
+This is the deepest problem in AI memory systems:
+an agent's memory is full of things it learned, inferred, was told, and captured —
+all of which could be wrong, partial, biased, or outdated.
+
+```
+Individual memory failure chain:
+  Document says X → agent reads X imperfectly → agent stores X'
+  Agent recalls X' → reasons from X' → concludes Y
+  Y is wrong because: X' ≠ X, and the reasoning itself may have errors
+  Agent is confident in Y because the reasoning felt coherent
+  
+  This is the broken memory problem. The elephant layer can contain broken elephants.
+  The crow layer can infer confidently from broken premises.
+```
+
+The Hayagriva layer is the correction mechanism:
+
+```python
+def hayagriva_correction(derived_answer: str, reasoning_chain: list, context: dict) -> Answer:
+    """
+    Before returning an answer: check whether it contradicts the Vedas.
+    If it does: the reasoning chain is broken somewhere. Flag it.
+    The Vedas don't adjust to fit the reasoning. The reasoning adjusts to fit the Vedas.
+    """
+    validation = veda_layer.validate_answer(derived_answer, context)
+    
+    if validation.has_violation:
+        return Answer(
+            content=derived_answer,
+            warning=f"This answer may contradict a foundational constraint: {validation.violation}",
+            confidence_override=0.2,  # regardless of reasoning chain confidence
+            note="Hayagriva flag: derived reasoning contradicts foundational knowledge. "
+                 "The reasoning chain likely contains an error."
+        )
+    
+    return Answer(content=derived_answer, confidence=validation.derived_confidence)
+```
+
+### The Intuition Signal — Convergence Without Communication
+
+The user describes intuition as knowledge that "happens itself."
+In AI systems, the closest approximation to this is **convergent multi-path recognition**:
+
+When multiple independent reasoning paths — from different workers, different sources,
+different inference chains, none communicating with each other — all arrive at the same answer:
+**that convergence is the intuition signal.**
+
+Not because any one path is certain. But because independent convergence is the strongest
+possible evidence that the answer is correct. The collective mind has recognized a truth.
+
+```python
+def intuition_signal(worker_results: list[WorkerResult]) -> float:
+    """
+    When many independent paths arrive at the same answer without coordination:
+    this is the system-level equivalent of intuition.
+    The answer was recognized, not constructed.
+    """
+    answer_counts = Counter(r.core_answer for r in worker_results)
+    most_common_answer, count = answer_counts.most_common(1)[0]
+    
+    convergence_ratio = count / len(worker_results)
+    independence_score = measure_source_independence(worker_results)
+    
+    intuition_strength = convergence_ratio * independence_score
+    # High convergence from truly independent sources = strong intuition signal
+    # High convergence from correlated sources = weaker signal
+    
+    if intuition_strength > 0.75:
+        # The collective mind has spoken. This answer arrived without being forced.
+        return IntuitionReading(
+            strength=intuition_strength,
+            answer=most_common_answer,
+            note="Hayagriva signal: this answer emerged from convergence, not reasoning."
+        )
+```
+
+The bee's waggle dance consensus is a primitive version of this.
+The Hayagriva model names what the bee is actually doing:
+when enough independent scouts all find the same source — that is recognition, not retrieval.
+
+### Focus Brings Knowledge — The Attention Model
+
+*"when we bring focus from memory it comes itself"*
+
+The ordinary mind doesn't retrieve from memory by force — it directs attention,
+and what is relevant flows forward. This is how human memory actually works.
+Not a database query. An orientation.
+
+```
+NOT this:  query("auth approach") → database lookup → return row
+THIS:      focus("auth approach") → relevant patterns surface in semantic space
+                                  → associated facts become salient
+                                  → answer presents itself through relevance, not address
+```
+
+In implementation: semantic vector search is architecturally closer to the Hayagriva model
+than keyword search. The query doesn't go looking — it places itself in the space,
+and what belongs near it is already there.
+
+---
+
+## The Complete Horse — Both Faces Together
+
+```
+Input arrives
+     │
+     ▼
+HORSE — FACE 1 (Biological — Pre-Cognitive Safety)
+  ├── Constitutional pattern match (fires before reasoning, no LLM)
+  ├── Panoramic multi-signal scan (350° — everything at once, low resolution)
+  ├── Contextual safety memory (is this context signature known-dangerous?)
+  └── Nervous system state propagation (herd vigilance)
+     │
+     ▼ (if not blocked)
+HORSE — FACE 2 (Hayagriva — Pure Knowledge Gate)
+  ├── Validate against Vedas (does this answer/query contradict foundational truth?)
+  ├── Intuition signal check (have multiple independent paths converged?)
+  ├── Broken memory detection (does the derived answer violate known axioms?)
+  └── Recognition mode suggestion (can this be recognized from semantic space
+                                   rather than reasoned from episodic memory?)
+     │
+     ▼ (if passes Hayagriva gate)
+HERON → EAGLE → ANT → BEE → CROW → SWAN → Answer
+```
+
+The biological horse catches threats to the system's safety.
+Hayagriva catches threats to the system's truth.
+Both fire before the reasoning pipeline.
+Both protect something that reasoning cannot protect itself.
+
 ---
 
 ## The Foundational Insight — The Only Prey Animal Here
