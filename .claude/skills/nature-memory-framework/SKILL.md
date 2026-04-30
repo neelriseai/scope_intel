@@ -6,7 +6,7 @@ description: >
   specialised storage. A multi-agent memory system should mirror this —
   each memory type is a query strategy, not a separate database.
 status: candidate         # not implemented — under evaluation
-relates_to: elephant-memory, episodic-memory, scope-intelligence-toolkit
+relates_to: elephant-memory, episodic-memory, scope-intelligence-toolkit, knowledge-taxonomy, horse-vigilance, dog-companion, eagle-retrieval, crow-inference, octopus-memory
 ---
 
 ## The Philosophy of Each Animal — Start Here
@@ -136,6 +136,16 @@ A severed octopus arm still reacts for an hour — the local mind persists witho
 - Mouse    → *what nobody knew to look for* (experimental discovery)
 - Pigeon   → *how messages reliably reach the right place* (permanent routing)
 - Octopus  → *how to distribute without a centre* (autonomous agents)
+
+And beneath all of these — a map of what KIND of knowing each layer handles:
+- Habitual knowing    → model weights (forward pass) — horse constitutional surface
+- Informational knowing → elephant / episodic / bee-playbooks
+- Computational knowing → crow (sequential inference)
+- Incubation intuition  → *the missing layer* — no animal yet handles it (proposed: IncubationAgent)
+- Receptive intuition   → Hayagriva / horse-face-2 mode
+- Unitive knowing       → octopus collective + system coherence (emerges, not designed)
+
+See `knowledge-taxonomy/SKILL.md` for the full epistemological map.
 
 In software terms: these are not competing approaches — they are complementary layers
 that address different failure modes of a single flat memory store.
@@ -433,6 +443,12 @@ This layer wraps the entire pipeline. It does not process data — it processes 
 | Sequential inference | `crow-inference/SKILL.md` | Crow 🐦‍⬛ | When retrieval fails, reason to construct the answer |
 | Purity / refinement | `swan-purity/SKILL.md` | Swan 🦢 | Remove noise, duplicates, stale, low-authority entries |
 | Experimental probe | `mouse-explorer/SKILL.md` | Mouse 🐭 | Discover new knowledge through direct experiment |
+
+### Meta-Framework — What Type of Knowing Each Layer Handles
+
+| Layer | Skill File | What it covers |
+|---|---|---|
+| Epistemological map | `knowledge-taxonomy/SKILL.md` | Four types of knowing × coverage by animal layer. Identifies incubation (Type 4A) as the missing architectural piece. |
 
 ### The Full Pipeline
 
