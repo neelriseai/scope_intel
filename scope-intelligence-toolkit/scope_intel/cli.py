@@ -1005,6 +1005,10 @@ def _fmt_ingest(r: dict) -> None:
     dry = "  [DRY RUN — nothing written]" if r.get("dry_run") else ""
     mode_tag = f"  [mode={r.get('mode','python')}]" if r.get("mode") else ""
     print(f"scope doc ingest{dry}{mode_tag}")
+
+    if r.get("warning"):
+        print(f"  ⚠ {r['warning']}")
+
     print(f"  source:            {r['source']}")
     print(f"  format:            {r['format']}")
     print(f"  sections parsed:   {r['sections_parsed']}")
@@ -1013,9 +1017,20 @@ def _fmt_ingest(r: dict) -> None:
     print(f"  files skipped:     {r['files_skipped']}")
     print(f"  memories added:    {r['memories_added']}")
     print(f"  features added:    {r['features_added']}")
-    if r.get("llm_chunks_classified"):
-        print(f"  chunks classified: {r['llm_chunks_classified']}  "
-              f"(llm={r.get('llm_chunks_by_llm',0)}  fallback={r.get('llm_chunks_fallback',0)})")
+
+    if r.get("llm_chunks_classified") is not None:
+        total   = r["llm_chunks_classified"]
+        by_llm  = r.get("llm_chunks_by_llm", 0)
+        fb      = r.get("llm_chunks_fallback", 0)
+        pct     = f"  ({by_llm/total*100:.0f}% by LLM)" if total else ""
+        print(f"  chunks classified: {total}  (llm={by_llm}  fallback={fb}){pct}")
+
+    gctx = r.get("global_context")
+    if gctx and gctx.get("project_name"):
+        print(f"  project detected:  {gctx['project_name']}")
+        if gctx.get("tech_stack"):
+            print(f"  tech stack:        {', '.join(gctx['tech_stack'][:6])}")
+
     if r.get("conflicts_after_ingest") is not None:
         n = r["conflicts_after_ingest"]
         flag = "  ⚠ run: scope mem conflicts" if n > 0 else ""

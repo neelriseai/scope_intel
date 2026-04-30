@@ -663,7 +663,8 @@ def _ingest_with_llm(
     # --- CLAUDE.md ---
     if not dry_run and update_claude_md:
         written = [f for f in generated_files if f.get("status") == "written"]
-        _update_claude_md(repo_root, project_name=repo_root.name, generated=written)
+        project_name = global_ctx.get("project_name") or repo_root.name
+        _update_claude_md(repo_root, project_name=project_name, generated=written)
 
     # --- Swan purity pass: detect conflicts in newly added memories ---
     conflicts_after = None
