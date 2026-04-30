@@ -407,6 +407,18 @@ TOOLS: list[dict] = [
             "required": ["query"],
         },
     },
+    {
+        "name": "doc_stats",
+        "description": (
+            "Show character and estimated token counts for every .ai-context/ file. "
+            "Use this to understand how much context budget the generated docs consume "
+            "before deciding which files to pass to Claude."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": _REPO_PROP,
+        },
+    },
     # --- Phase 5 tools ---
     {
         "name": "mem_auto_capture",
@@ -704,6 +716,40 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "files_with_matches": len(results),
             "total_matches": sum(r["match_count"] for r in results),
             "results": results,
+        }
+
+    if name == "doc_stats":
+        ai_ctx = repo / ".ai-context"
+        if not ai_ctx.exists():
+            return {"error": "no .ai-context/ found — run doc_ingest first"}
+
+        def _scan(directory: Path, layer: str) -> list[dict]:
+            out: list[dict] = []
+            if not directory.exists():
+                return out
+            for p in sorted(directory.glob("*.md")):
+                try:
+                    chars = len(p.read_text(encoding="utf-8"))
+                except OSError:
+                    chars = 0
+                out.append({
+                    "id":    p.stem,
+                    "path":  str(p.relative_to(repo)).replace("\\", "/"),
+                    "layer": layer,
+                    "chars": chars,
+                    "tokens": chars // 4,
+                })
+            return out
+
+        generated = _scan(ai_ctx / "generated", "generated")
+        curated   = _scan(ai_ctx / "curated",   "curated")
+        all_files = generated + curated
+        return {
+            "generated":    generated,
+            "curated":      curated,
+            "total_files":  len(all_files),
+            "total_chars":  sum(f["chars"]  for f in all_files),
+            "total_tokens": sum(f["tokens"] for f in all_files),
         }
 
     # --- Phase 5 ---

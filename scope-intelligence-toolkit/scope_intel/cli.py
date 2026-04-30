@@ -242,6 +242,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show what would be removed without deleting anything.",
     )
 
+    # doc stats — token/char counts per .ai-context/ file
+    p_stats = doc_sub.add_parser(
+        "stats",
+        help="Show character and estimated token counts for all .ai-context/ files.",
+    )
+    p_stats.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_stats.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc search — grep across generated .ai-context/ files
     p_search = doc_sub.add_parser(
         "search",
@@ -1353,6 +1361,90 @@ def _fmt_doc_fetch(r: dict) -> None:
     print(r["content"])
 
 
+def _doc_stats(repo: Path) -> dict:
+    """Return character/token counts for every .ai-context/ file.
+
+    Token estimate: 1 token ≈ 4 characters (conservative GPT-style heuristic).
+    """
+    ai_ctx = repo / ".ai-context"
+    if not ai_ctx.exists():
+        return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
+
+    def _scan_dir(directory: Path, layer: str) -> list[dict]:
+        files: list[dict] = []
+        if not directory.exists():
+            return files
+        for p in sorted(directory.glob("*.md")):
+            rel = str(p.relative_to(repo)).replace("\\", "/")
+            try:
+                chars = len(p.read_text(encoding="utf-8"))
+            except OSError:
+                chars = 0
+            files.append({
+                "id":     p.stem,
+                "path":   rel,
+                "layer":  layer,
+                "chars":  chars,
+                "tokens": chars // 4,   # ~4 chars per token
+            })
+        return files
+
+    generated = _scan_dir(ai_ctx / "generated", "generated")
+    curated   = _scan_dir(ai_ctx / "curated",   "curated")
+    all_files = generated + curated
+    total_chars  = sum(f["chars"]  for f in all_files)
+    total_tokens = sum(f["tokens"] for f in all_files)
+
+    return {
+        "generated":    generated,
+        "curated":      curated,
+        "total_files":  len(all_files),
+        "total_chars":  total_chars,
+        "total_tokens": total_tokens,
+    }
+
+
+def _fmt_doc_stats(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+
+    def _bar(n: int, max_n: int, width: int = 20) -> str:
+        filled = int(n / max_n * width) if max_n else 0
+        return "█" * filled + "░" * (width - filled)
+
+    all_files = r.get("generated", []) + r.get("curated", [])
+    max_tokens = max((f["tokens"] for f in all_files), default=1)
+
+    print(f"AI context file stats — {r['total_files']} files  "
+          f"{r['total_chars']:,} chars  ~{r['total_tokens']:,} tokens")
+    print()
+
+    for layer, key in [("generated/", "generated"), ("curated/", "curated")]:
+        files = r.get(key, [])
+        if not files:
+            continue
+        print(f"  {layer}")
+        for f in files:
+            bar = _bar(f["tokens"], max_tokens)
+            print(f"    {f['id']:<40} {f['chars']:>7,} chars  "
+                  f"~{f['tokens']:>5,} tok  {bar}")
+        print()
+
+    print(f"  total: {r['total_chars']:,} chars  ~{r['total_tokens']:,} tokens")
+
+    # Context budget hints
+    token_budget = r["total_tokens"]
+    if token_budget < 8_000:
+        hint = "fits easily in a single 8k context window"
+    elif token_budget < 32_000:
+        hint = "fits in a 32k context window"
+    elif token_budget < 128_000:
+        hint = "fits in a 128k context window"
+    else:
+        hint = "⚠ exceeds 128k tokens — consider splitting or using scope doc fetch selectively"
+    print(f"  budget: {hint}")
+
+
 def cmd_doc(args) -> int:
     if args.doc_cmd == "ingest":
         repo = _resolve_repo(args.repo)
@@ -1370,6 +1462,12 @@ def cmd_doc(args) -> int:
             second_pass=args.second_pass,
         )
         _emit(result, args.json, formatter=_fmt_ingest)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "stats":
+        repo = _resolve_repo(args.repo)
+        result = _doc_stats(repo)
+        _emit(result, args.json, formatter=_fmt_doc_stats)
         return 0 if "error" not in result else 2
 
     if args.doc_cmd == "list":

@@ -752,6 +752,68 @@ class TestDocSearch:
 
 
 # ---------------------------------------------------------------------------
+# doc stats helper
+# ---------------------------------------------------------------------------
+
+class TestDocStats:
+    """Test the _doc_stats() helper used by `scope doc stats` and MCP doc_stats."""
+
+    def test_stats_no_ai_context_returns_error(self, repo):
+        from scope_intel.cli import _doc_stats
+        result = _doc_stats(repo)
+        assert "error" in result
+
+    def test_stats_after_ingest_has_totals(self, repo, md_file):
+        from scope_intel.cli import _doc_stats
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_stats(repo)
+        assert "error" not in result
+        assert result["total_files"] > 0
+        assert result["total_chars"] > 0
+        assert result["total_tokens"] > 0
+
+    def test_stats_tokens_approx_chars_over_4(self, repo, md_file):
+        from scope_intel.cli import _doc_stats
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_stats(repo)
+        # Per-file token = chars // 4 (integer division truncates per file, not in aggregate)
+        # total_tokens ≈ total_chars / 4, within ±(num_files) due to truncation
+        n = result["total_files"]
+        approx = result["total_chars"] / 4
+        assert abs(result["total_tokens"] - approx) <= n + 1
+
+    def test_stats_generated_and_curated_listed(self, repo, md_file):
+        from scope_intel.cli import _doc_stats
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_stats(repo)
+        assert isinstance(result["generated"], list)
+        assert isinstance(result["curated"], list)
+        # SAMPLE_MD produces at least one generated and one curated file
+        assert len(result["generated"]) > 0
+        assert len(result["curated"]) > 0
+
+    def test_stats_each_entry_has_required_keys(self, repo, md_file):
+        from scope_intel.cli import _doc_stats
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_stats(repo)
+        for entry in result["generated"] + result["curated"]:
+            assert "id"     in entry
+            assert "path"   in entry
+            assert "layer"  in entry
+            assert "chars"  in entry
+            assert "tokens" in entry
+
+    def test_stats_total_matches_sum_of_parts(self, repo, md_file):
+        from scope_intel.cli import _doc_stats
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_stats(repo)
+        all_files = result["generated"] + result["curated"]
+        assert result["total_chars"]  == sum(f["chars"]  for f in all_files)
+        assert result["total_tokens"] == sum(f["tokens"] for f in all_files)
+        assert result["total_files"]  == len(all_files)
+
+
+# ---------------------------------------------------------------------------
 # doc clear (tested via filesystem state)
 # ---------------------------------------------------------------------------
 
