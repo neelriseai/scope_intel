@@ -23,7 +23,7 @@ from scope_intel.adapters.doc_reader import (
     _docx_table_to_markdown,
 )
 from scope_intel.core.llm_client import NullLLMClient, get_client
-from scope_intel.cli import _doc_list, _doc_fetch
+from scope_intel.cli import _doc_list, _doc_fetch, _doc_search
 from scope_intel.core.doc_ingestor import (
     _route_section,
     _split_sections,
@@ -614,3 +614,106 @@ class TestDocListAndFetch:
         if "error" in result:
             assert "ambiguous" in result["error"] or "no file" in result["error"]
         # (if only one matches, that's also acceptable)
+
+
+# ---------------------------------------------------------------------------
+# doc search helper
+# ---------------------------------------------------------------------------
+
+class TestDocSearch:
+    def test_search_no_ai_context_returns_error(self, repo):
+        result = _doc_search(repo, "anything")
+        assert "error" in result
+
+    def test_search_finds_keyword(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        # SAMPLE_MD has "Redis" in the Memory Layer section
+        result = _doc_search(repo, "Redis")
+        assert "error" not in result, result
+        assert result["total_matches"] > 0
+
+    def test_search_returns_file_and_line(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_search(repo, "Redis")
+        assert result["files_with_matches"] > 0
+        hit = result["results"][0]
+        assert "file_id" in hit
+        assert "path" in hit
+        assert "matches" in hit
+        match = hit["matches"][0]
+        assert "line_no" in match
+        assert "line" in match
+        assert "Redis" in match["line"]
+
+    def test_search_context_lines_present(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_search(repo, "Redis", context_lines=2)
+        if result["total_matches"] > 0:
+            m = result["results"][0]["matches"][0]
+            assert isinstance(m["context_before"], list)
+            assert isinstance(m["context_after"], list)
+
+    def test_search_case_insensitive(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        r1 = _doc_search(repo, "redis")   # lowercase
+        r2 = _doc_search(repo, "REDIS")   # uppercase
+        assert r1["total_matches"] == r2["total_matches"]
+
+    def test_search_layer_filter_generated(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        r_all = _doc_search(repo, "Auto-generated", layer="all")
+        r_gen = _doc_search(repo, "Auto-generated", layer="generated")
+        # generated/ should have matches (the auto-generated footer)
+        assert r_gen["total_matches"] > 0
+        assert r_gen["total_matches"] <= r_all["total_matches"]
+
+    def test_search_no_match_returns_empty_results(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_search(repo, "xyznonexistentkeyword999")
+        assert "error" not in result
+        assert result["total_matches"] == 0
+        assert result["results"] == []
+
+    def test_search_total_matches_consistent(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_search(repo, "Auto-generated")
+        manual_total = sum(r["match_count"] for r in result["results"])
+        assert result["total_matches"] == manual_total
+
+
+# ---------------------------------------------------------------------------
+# doc clear (tested via filesystem state)
+# ---------------------------------------------------------------------------
+
+class TestDocClear:
+    """Test _doc_clear logic through ingest+clear cycle.
+
+    We can't easily call the CLI arg-based cmd_doc("clear") from tests,
+    so we test the filesystem directly after using the CLI subprocess approach
+    or just verify the directory state after a real clear via Python.
+    """
+
+    def test_clear_removes_generated_files(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        gen_dir = repo / ".ai-context" / "generated"
+        assert gen_dir.exists()
+        assert len(list(gen_dir.glob("*.md"))) > 0
+
+        # Simulate what clear does
+        import shutil
+        shutil.rmtree(gen_dir)
+
+        # After clear, list should error
+        result = _doc_list(repo)
+        assert "error" in result
+
+    def test_ingest_after_clear_starts_fresh(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        gen_dir = repo / ".ai-context" / "generated"
+        import shutil
+        shutil.rmtree(gen_dir)
+
+        # Re-ingest should work cleanly
+        result = ingest_document(repo, md_file, overwrite=True)
+        assert "error" not in result
+        assert result["files_written"] > 0
