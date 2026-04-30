@@ -59,12 +59,30 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Optional
 
 from . import store
 from .mempalace import add_memory, detect_conflicts
+
+# ---------------------------------------------------------------------------
+# Progress helper — writes to stderr so JSON stdout stays clean
+# ---------------------------------------------------------------------------
+
+def _progress(msg: str, *, end: str = "\n") -> None:
+    """Print a progress message to stderr.
+
+    Uses end='\r' for in-place updates (chunk-by-chunk progress bar).
+    Uses end='\n' (default) for milestone lines that should persist.
+    Only writes when stderr is a real terminal — stays silent in CI/pipes.
+    """
+    if sys.stderr.isatty():
+        # Pad to 80 chars so \r overwrites previous longer lines cleanly
+        padded = msg.ljust(80) if end == "\r" else msg
+        sys.stderr.write(padded + end)
+        sys.stderr.flush()
 
 # ---------------------------------------------------------------------------
 # Routing tables
@@ -452,12 +470,15 @@ def _ingest_with_llm(
         return {"error": "document produced no sections after heading split"}
 
     # --- Step 2: global summary (single LLM call) ---
+    _progress(f"Global summary pass… ({len(chunks)} chunks to classify)")
     global_ctx = llm.global_summary(full_text) or {
         "project_name": doc_path.stem,
         "purpose": "",
         "components": [],
         "tech_stack": [],
     }
+    proj = global_ctx.get("project_name", doc_path.stem)
+    _progress(f"Project: {proj}  |  classifying {len(chunks)} chunks…")
 
     # --- Step 3: per-chunk classification ---
     # Buckets: target_file_name → {title, sections[], all_key_facts[], constraints[]}
@@ -466,8 +487,13 @@ def _ingest_with_llm(
     llm_count = 0
     fallback_count = 0
     unmatched: list[str] = []
+    total_chunks = len(chunks)
 
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks, 1):
+        _progress(
+            f"[{i}/{total_chunks}] {chunk.get('heading_path', chunk['title'])[:60]}",
+            end="\r",
+        )
         classification = llm.classify_chunk(chunk, global_ctx)
         target_file = None
 
@@ -537,6 +563,12 @@ def _ingest_with_llm(
                 "entry_points": [],
             })
 
+    # Clear the \r progress line and print completion summary
+    _progress(
+        f"Classification done: {llm_count} by LLM, {fallback_count} fallback  "
+        f"→ {len(buckets)} output files"
+    )
+
     # --- Step 4: prepare output dirs ---
     ai_ctx  = repo_root / ".ai-context"
     gen_dir = ai_ctx / "generated"
@@ -548,6 +580,7 @@ def _ingest_with_llm(
 
     # --- Step 5: second pass — module-map.md (optional) ---
     if second_pass and "module-map.md" not in buckets:
+        _progress("Second pass: synthesising module-map.md…")
         file_summaries = [
             {
                 "title": data["title"],
