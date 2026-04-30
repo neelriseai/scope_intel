@@ -673,8 +673,6 @@ def ingest_document(
 ) -> dict:
     """Parse a design document and generate .ai-context/ files.
 
-    """Parse a design document and generate .ai-context/ files.
-
     Args:
         repo_root:        Root of the target repo (must be scope-initialised).
         doc_path:         Path to the design document (PDF/DOCX/MD/TXT).
