@@ -71,26 +71,59 @@ from .mempalace import add_memory, detect_conflicts
 # ---------------------------------------------------------------------------
 
 # Each entry: (regex_pattern, numbered_prefix_or_None, filename_slug)
+#
+# ROUTING ORDER MATTERS:
+#   _route_section() checks CURATED routes FIRST (they have very distinctive
+#   heading names and rarely produce false positives), then GENERATED.
+#   This prevents generated routes from stealing a "Constraints" section just
+#   because its body happens to mention "validation" or "architecture".
+#
+#   Within GENERATED_ROUTES: more specific patterns must come BEFORE broad ones.
+#   '\blayer\b' is intentionally ABSENT from the architecture route — it is too
+#   broad and would match "memory layer", "rag layer", etc.
+
 GENERATED_ROUTES: list[tuple] = [
-    (r"\boverview\b|\bintroduction\b|\babout\b|\bpurpose\b|\bwhat is\b|\bproject goal", "001", "project-overview"),
-    (r"\barchitecture\b|\bsystem design\b|\bhigh.level\b|\blayer\b|\bcomponent overview\b", "002", "system-architecture"),
-    (r"\bengine\b|\bcore\b|\bdeterministic\b|\bprocessor\b|\bpipeline\b|\bexecution", "003", "deterministic-engine"),
-    (r"\brag\b|\bretrieval\b|\bvector\b|\bembedding\b|\bsemantic search\b|\bchunk", "004", "rag-layer"),
-    (r"\bmemory\b|\bstorage\b|\bpersistence\b|\bknowledge store\b|\bcache\b|\bmempalace", "005", "memory-layer"),
-    (r"\bvalidation\b|\bverif\b|\bquality\b|\bguardrail\b|\btesting strategy\b|\bcheck", "006", "validation-engine"),
-    (r"\bskill\b|\bplaybook\b|\bworkflow\b|\bprocedure\b|\brecipe\b|\bstep.by.step", "007", "skill-playbooks"),
-    (r"\bagent\b|\bsubagent\b|\bmulti.agent\b|\bdelegat\b|\bcoordinat\b|\borchestrat", "008", "subagent-strategy"),
-    (r"\bschema\b|\bdata model\b|\bdata structure\b|\btype system\b|\bjson schema\b|\bpayload", "009", "schema-design"),
-    (r"\bclaude.code\b|\bclaude integration\b|\bhook\b|\bmcp server\b", None, "claude-code-integration"),
-    (r"\bapi\b|\bcontract\b|\bmcp\b|\brpc\b|\bendpoint\b|\bmethod signature\b|\bprotocol", None, "mcp-contract"),
+    # --- Highly specific / low false-positive risk — check first ---
+    # Roadmap: "\broadmap\b" is unique; "milestone", "phase plan" are specific
     (r"\broadmap\b|\bphase plan\b|\bmilestone\b|\brelease plan\b|\bbacklog\b|\bsprint", None, "roadmap"),
-    (r"\bsymbol\b|\btype definition\b|\bdata type\b|\binterface definition\b", None, "symbol-schema"),
+    # RAG: very distinctive vocabulary
+    (r"\brag\b|\bretrieval.augmented\b|\bvector store\b|\bembedding\b|\bsemantic search\b", "004", "rag-layer"),
+    # Skills / playbooks
+    (r"\bskill\b|\bplaybook\b|\bworkflow\b|\bprocedure\b|\brecipe\b|\bstep.by.step", "007", "skill-playbooks"),
+    # Subagents: multi-agent is specific
+    (r"\bsubagent\b|\bmulti.agent\b|\bdelegat\b|\bcoordinat\b|\borchestrat", "008", "subagent-strategy"),
+    # Claude / MCP integration
+    (r"\bclaude.code\b|\bclaude integration\b|\bslash command\b|\bhook\b|\bmcp server\b", None, "claude-code-integration"),
+    # MCP contract / API — specific keywords
+    (r"\bmcp contract\b|\bapi contract\b|\bjson.rpc\b|\brpc method\b|\bmethod signature\b|\btool schema\b", None, "mcp-contract"),
+    # Symbol schema — very specific terms
+    (r"\bsymbol schema\b|\btype definition\b|\bdata type system\b|\binterface definition\b", None, "symbol-schema"),
+    # --- Moderately specific compound patterns ---
+    (r"\boverview\b|\bintroduction\b|\babout\b|\bpurpose\b|\bwhat is\b|\bproject goal", "001", "project-overview"),
+    (r"\barchitecture\b|\bsystem design\b|\bhigh.level\b|\bcomponent overview\b", "002", "system-architecture"),
+    # Deterministic engine — require compound phrase or specific word, not bare "engine"
+    (r"\bdeterministic engine\b|\bdeterministic layer\b|\bcore engine\b|\bdeterministic\b|\bprocessor\b", "003", "deterministic-engine"),
+    # Memory layer — compound phrase first, then broad "memory"
+    (r"\bmemory layer\b|\bmemory store\b|\bstorage layer\b|\bpersistence layer\b|\bmempalace\b|\bknowledge store\b|\bcache layer\b", "005", "memory-layer"),
+    # Validation engine — compound phrase first
+    (r"\bvalidation engine\b|\bvalidation layer\b|\bguardrail\b|\btesting strategy\b|\bverif", "006", "validation-engine"),
+    # Schema design
+    (r"\bschema\b|\bdata model\b|\bdata structure\b|\btype system\b|\bjson schema\b|\bpayload", "009", "schema-design"),
+    # --- Broad single-word fallbacks (lowest priority) ---
+    (r"\bmemory\b|\bstorage\b|\bpersistence\b|\bcache\b", "005", "memory-layer"),
+    (r"\bvalidation\b", "006", "validation-engine"),
+    (r"\bapi\b|\bcontract\b|\bmcp\b|\brpc\b|\bendpoint\b|\bprotocol", None, "mcp-contract"),
+    (r"\bagent\b", "008", "subagent-strategy"),
+    (r"\bengine\b|\bpipeline\b", "003", "deterministic-engine"),
+    (r"\bsymbol\b|\bdata type\b", None, "symbol-schema"),
+    (r"\bchunk\b|\bvector\b", "004", "rag-layer"),
 ]
 
 CURATED_ROUTES: list[tuple] = [
-    (r"\bconstraint\b|\brule\b|\bprinciple\b|\bmust not\b|\bshould not\b|\bavoid\b|\bnever\b|\bguide\b|\bgolden rule", "constraints"),
+    # constraints? — matches both "constraint" (singular) and "constraints" (plural)
+    (r"\bconstraints?\b|\brules?\b|\bprinciples?\b|\bmust not\b|\bshould not\b|\bavoid\b|\bnever\b|\bgolden rule", "constraints"),
     (r"\bcurrent phase\b|\bactive phase\b|\bin progress\b|\bnow building\b|\bcurrent sprint\b|\bthis iteration\b", "current-phase"),
-    (r"\bmodule map\b|\bfile structure\b|\bdirectory layout\b|\bfolder\b|\bfile map\b|\bcode map\b|\bmodule breakdown", "module-map"),
+    (r"\bmodule map\b|\bfile structure\b|\bdirectory layout\b|\bfile map\b|\bcode map\b|\bmodule breakdown", "module-map"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -259,16 +292,24 @@ def _route_section(title: str, body_snippet: str) -> tuple[str | None, str | Non
       dest_type : 'generated' | 'curated' | None
       prefix    : '001' … '009' | None
       slug      : filename stem (without extension)
+
+    Curated routes are checked FIRST because they have very distinctive
+    heading names (Constraints, Module Map, Current Phase) and rarely
+    produce false positives.  Checking them first prevents generated routes
+    from stealing a "Constraints" section just because its body happens to
+    contain words like "validation" or "architecture".
     """
     combined = (title + " " + body_snippet[:300]).lower()
 
-    for pattern, prefix, slug in GENERATED_ROUTES:
-        if re.search(pattern, combined, re.I):
-            return "generated", prefix, slug
-
+    # 1. Curated first — distinctive headings, nearly zero false positives
     for pattern, slug in CURATED_ROUTES:
         if re.search(pattern, combined, re.I):
             return "curated", None, slug
+
+    # 2. Generated — longer list, some broad patterns at the end
+    for pattern, prefix, slug in GENERATED_ROUTES:
+        if re.search(pattern, combined, re.I):
+            return "generated", prefix, slug
 
     return None, None, None
 
