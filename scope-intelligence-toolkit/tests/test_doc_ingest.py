@@ -814,6 +814,74 @@ class TestDocStats:
 
 
 # ---------------------------------------------------------------------------
+# doc export helper
+# ---------------------------------------------------------------------------
+
+class TestDocExport:
+    """Test the _doc_export() helper used by `scope doc export` and MCP doc_export."""
+
+    def test_export_no_ai_context_returns_error(self, repo):
+        from scope_intel.cli import _doc_export
+        result = _doc_export(repo)
+        assert "error" in result
+
+    def test_export_after_ingest_has_content(self, repo, md_file):
+        from scope_intel.cli import _doc_export
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_export(repo)
+        assert "error" not in result
+        assert len(result["content"]) > 0
+        assert result["total_files"] > 0
+
+    def test_export_contains_all_file_content(self, repo, md_file):
+        from scope_intel.cli import _doc_export
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_export(repo)
+        # Content from SAMPLE_MD should be present somewhere in the export
+        assert "Redis" in result["content"]   # from Memory Layer section
+
+    def test_export_header_present_by_default(self, repo, md_file):
+        from scope_intel.cli import _doc_export
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_export(repo)
+        assert "scope-intel-export" in result["content"]
+
+    def test_export_no_header_flag(self, repo, md_file):
+        from scope_intel.cli import _doc_export
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_export(repo, include_header=False)
+        assert "scope-intel-export" not in result["content"]
+
+    def test_export_layer_generated_only(self, repo, md_file):
+        from scope_intel.cli import _doc_export
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_export(repo, layer="generated")
+        layers = {f["layer"] for f in result["files"]}
+        assert layers == {"generated"}
+
+    def test_export_layer_curated_only(self, repo, md_file):
+        from scope_intel.cli import _doc_export
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_export(repo, layer="curated")
+        layers = {f["layer"] for f in result["files"]}
+        assert layers == {"curated"}
+
+    def test_export_result_keys(self, repo, md_file):
+        from scope_intel.cli import _doc_export
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_export(repo)
+        for key in ("content", "source", "total_files", "total_chars",
+                    "total_tokens", "files"):
+            assert key in result
+
+    def test_export_total_files_matches_list(self, repo, md_file):
+        from scope_intel.cli import _doc_export
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_export(repo)
+        assert result["total_files"] == len(result["files"])
+
+
+# ---------------------------------------------------------------------------
 # doc clear (tested via filesystem state)
 # ---------------------------------------------------------------------------
 

@@ -419,6 +419,31 @@ TOOLS: list[dict] = [
             "properties": _REPO_PROP,
         },
     },
+    {
+        "name": "doc_export",
+        "description": (
+            "Concatenate all .ai-context/ files into a single text blob. "
+            "Useful for inserting the full design context into a prompt window "
+            "or sharing with a team. Returns {content, total_files, total_tokens}."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "layer": {
+                    "type": "string",
+                    "enum": ["generated", "curated", "all"],
+                    "default": "all",
+                    "description": "Which layer to include (default: all).",
+                },
+                "include_header": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include export header comment (default: true).",
+                },
+            },
+        },
+    },
     # --- Phase 5 tools ---
     {
         "name": "mem_auto_capture",
@@ -750,6 +775,73 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_files":  len(all_files),
             "total_chars":  sum(f["chars"]  for f in all_files),
             "total_tokens": sum(f["tokens"] for f in all_files),
+        }
+
+    if name == "doc_export":
+        import time as _time
+        ai_ctx = repo / ".ai-context"
+        if not ai_ctx.exists():
+            return {"error": "no .ai-context/ found — run doc_ingest first"}
+        layer = arguments.get("layer", "all")
+        include_header = arguments.get("include_header", True)
+
+        # Load source name from index.json
+        index_path = ai_ctx / "generated" / "index.json"
+        source = "unknown"
+        if index_path.exists():
+            try:
+                import json as _json2
+                source = _json2.loads(index_path.read_text(encoding="utf-8")).get("source", "unknown")
+            except Exception:  # noqa: BLE001
+                pass
+
+        dirs: list[tuple] = []
+        if layer in ("generated", "all"):
+            dirs.append((ai_ctx / "generated", "generated"))
+        if layer in ("curated", "all"):
+            dirs.append((ai_ctx / "curated", "curated"))
+
+        sections: list[dict] = []
+        for directory, lyr in dirs:
+            if not directory.exists():
+                continue
+            for p in sorted(directory.glob("*.md")):
+                try:
+                    text = p.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                sections.append({
+                    "id":    p.stem,
+                    "path":  str(p.relative_to(repo)).replace("\\", "/"),
+                    "layer": lyr,
+                    "chars": len(text),
+                    "_text": text,
+                })
+
+        if not sections:
+            return {"error": "no .ai-context/ files found"}
+
+        total_chars = sum(s["chars"] for s in sections)
+        parts: list[str] = []
+        if include_header:
+            parts.append(
+                f"<!-- scope-intel-export: {source} | "
+                f"{_time.strftime('%Y-%m-%d')} | "
+                f"{len(sections)} files | ~{total_chars // 4:,} tokens -->\n"
+            )
+        for s in sections:
+            parts.append(f"\n\n<!-- === {s['path']} [{s['layer']}] === -->\n\n")
+            parts.append(s["_text"])
+
+        content = "".join(parts)
+        return {
+            "content":      content,
+            "source":       source,
+            "total_files":  len(sections),
+            "total_chars":  len(content),
+            "total_tokens": len(content) // 4,
+            "files": [{"id": s["id"], "path": s["path"], "layer": s["layer"],
+                       "chars": s["chars"]} for s in sections],
         }
 
     # --- Phase 5 ---

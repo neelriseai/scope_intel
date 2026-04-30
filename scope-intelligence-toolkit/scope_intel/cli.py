@@ -242,6 +242,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show what would be removed without deleting anything.",
     )
 
+    # doc rebuild — clear generated/ then re-ingest
+    p_rebuild = doc_sub.add_parser(
+        "rebuild",
+        help="Clear generated .ai-context/ files and re-ingest a design doc in one step.",
+    )
+    p_rebuild.add_argument("doc", help="Path to the design document.")
+    p_rebuild.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_rebuild.add_argument(
+        "--mode", choices=["python", "llm"], default="python",
+        help="Extraction mode (default: python).",
+    )
+    p_rebuild.add_argument("--ollama-model", default="qwen2.5:14b", metavar="MODEL")
+    p_rebuild.add_argument("--ollama-url", default="http://localhost:11434", metavar="URL")
+    p_rebuild.add_argument("--second-pass", action="store_true")
+    p_rebuild.add_argument("--no-claude-md", action="store_true")
+    p_rebuild.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
+    # doc export — concatenate all .ai-context/ into one file
+    p_export = doc_sub.add_parser(
+        "export",
+        help="Concatenate all .ai-context/ files into a single file (or stdout).",
+    )
+    p_export.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_export.add_argument(
+        "--output", default="-", metavar="FILE",
+        help="Output file path. Use '-' for stdout (default: -).",
+    )
+    p_export.add_argument(
+        "--layer", choices=["generated", "curated", "all"], default="all",
+        help="Which layer to include (default: all).",
+    )
+    p_export.add_argument(
+        "--no-header", action="store_true",
+        help="Omit the export header comment.",
+    )
+    p_export.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc stats — token/char counts per .ai-context/ file
     p_stats = doc_sub.add_parser(
         "stats",
@@ -1445,6 +1482,85 @@ def _fmt_doc_stats(r: dict) -> None:
     print(f"  budget: {hint}")
 
 
+def _doc_export(
+    repo: Path,
+    *,
+    layer: str = "all",
+    include_header: bool = True,
+) -> dict:
+    """Concatenate all .ai-context/ files into a single text blob.
+
+    Returns:
+        {content, total_files, total_chars, total_tokens, source, files[]}
+    """
+    ai_ctx = repo / ".ai-context"
+    if not ai_ctx.exists():
+        return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
+
+    # Discover source doc name from index.json if available
+    index_path = ai_ctx / "generated" / "index.json"
+    source = "unknown"
+    if index_path.exists():
+        try:
+            source = json.loads(index_path.read_text(encoding="utf-8")).get("source", "unknown")
+        except Exception:  # noqa: BLE001
+            pass
+
+    dirs: list[tuple[Path, str]] = []
+    if layer in ("generated", "all"):
+        dirs.append((ai_ctx / "generated", "generated"))
+    if layer in ("curated", "all"):
+        dirs.append((ai_ctx / "curated", "curated"))
+
+    sections: list[dict] = []
+    for directory, lyr in dirs:
+        if not directory.exists():
+            continue
+        for p in sorted(directory.glob("*.md")):
+            try:
+                text = p.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            rel = str(p.relative_to(repo)).replace("\\", "/")
+            sections.append({
+                "id":    p.stem,
+                "path":  rel,
+                "layer": lyr,
+                "text":  text,
+                "chars": len(text),
+            })
+
+    if not sections:
+        return {"error": "no .ai-context/ files found — run `scope doc ingest` first"}
+
+    import time as _time
+    total_chars = sum(s["chars"] for s in sections)
+
+    # Build the combined text
+    parts: list[str] = []
+    if include_header:
+        parts.append(
+            f"<!-- scope-intel-export: {source} | "
+            f"{_time.strftime('%Y-%m-%d')} | "
+            f"{len(sections)} files | "
+            f"~{total_chars // 4:,} tokens -->\n"
+        )
+    for s in sections:
+        parts.append(f"\n\n<!-- === {s['path']} [{s['layer']}] === -->\n\n")
+        parts.append(s["text"])
+
+    content = "".join(parts)
+    return {
+        "content":      content,
+        "source":       source,
+        "total_files":  len(sections),
+        "total_chars":  len(content),
+        "total_tokens": len(content) // 4,
+        "files": [{"id": s["id"], "path": s["path"], "layer": s["layer"],
+                   "chars": s["chars"]} for s in sections],
+    }
+
+
 def cmd_doc(args) -> int:
     if args.doc_cmd == "ingest":
         repo = _resolve_repo(args.repo)
@@ -1463,6 +1579,64 @@ def cmd_doc(args) -> int:
         )
         _emit(result, args.json, formatter=_fmt_ingest)
         return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "rebuild":
+        repo = _resolve_repo(args.repo)
+        if _not_indexed(repo):
+            return 2
+        # Step 1: clear generated/ (preserve curated)
+        gen_dir = repo / ".ai-context" / "generated"
+        cleared = 0
+        if gen_dir.exists():
+            for p in list(gen_dir.iterdir()):
+                p.unlink()
+                cleared += 1
+            try:
+                gen_dir.rmdir()
+            except OSError:
+                pass
+        if not args.json:
+            print(f"cleared {cleared} file(s) from .ai-context/generated/")
+        # Step 2: re-ingest
+        result = ingest_document(
+            repo,
+            Path(args.doc),
+            overwrite=True,
+            dry_run=False,
+            update_claude_md=not args.no_claude_md,
+            mode=args.mode,
+            ollama_model=args.ollama_model,
+            ollama_url=args.ollama_url,
+            second_pass=args.second_pass,
+        )
+        result["rebuild_cleared"] = cleared
+        _emit(result, args.json, formatter=_fmt_ingest)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "export":
+        repo = _resolve_repo(args.repo)
+        result = _doc_export(repo, layer=args.layer, include_header=not args.no_header)
+        if "error" in result:
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(result["error"], file=sys.stderr)
+            return 2
+        if args.json:
+            # JSON mode: return metadata + content
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return 0
+        content = result["content"]
+        if args.output == "-":
+            print(content)
+        else:
+            out = Path(args.output)
+            out.write_text(content, encoding="utf-8")
+            print(f"exported {result['total_files']} files  "
+                  f"{result['total_chars']:,} chars  "
+                  f"~{result['total_tokens']:,} tokens  → {out}",
+                  file=sys.stderr)
+        return 0
 
     if args.doc_cmd == "stats":
         repo = _resolve_repo(args.repo)
