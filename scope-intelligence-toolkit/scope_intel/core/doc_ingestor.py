@@ -1069,7 +1069,7 @@ def _ingest_python_only(
         conflicts_after = conflict_result.get("total", 0)
 
     written_count = sum(1 for f in generated_files if f.get("status") == "written")
-    return {
+    result: dict = {
         "source": str(doc_path),
         "format": read_result.get("format", "?"),
         "mode":   "python",
@@ -1085,3 +1085,7 @@ def _ingest_python_only(
         "unmatched_sections": unmatched,
         "conflicts_after_ingest": conflicts_after,
     }
+    # Pass through PDF reader info if available ("pdfplumber" or "pypdf")
+    if read_result.get("reader"):
+        result["pdf_reader"] = read_result["reader"]
+    return result

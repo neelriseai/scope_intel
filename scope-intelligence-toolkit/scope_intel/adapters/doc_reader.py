@@ -327,11 +327,22 @@ def _read_docx(path: Path) -> dict:
                     continue
                 style = para.style.name or ""
                 if style.startswith("Heading"):
+                    # "Heading 1" → #, "Heading 2" → ##, etc.
                     try:
                         level = int(style.split()[-1])
                     except ValueError:
                         level = 2
                     lines.append("#" * min(level, 4) + " " + text)
+                elif style in ("Title",):
+                    # Document Title style → h1 (the document heading)
+                    lines.append("# " + text)
+                elif style in ("Subtitle",):
+                    # Document Subtitle → italic paragraph (not a heading,
+                    # but worth preserving as context for the LLM)
+                    lines.append(f"_{text}_")
+                elif style in ("Caption",):
+                    # Figure/table captions → preserve as italic note
+                    lines.append(f"_{text}_")
                 else:
                     lines.append(text)
 
