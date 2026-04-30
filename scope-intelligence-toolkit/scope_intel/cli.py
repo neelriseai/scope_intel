@@ -1165,6 +1165,13 @@ def _fmt_ingest(r: dict) -> None:
         for f in sorted(skipped, key=lambda x: x["path"]):
             print(f"  {f['path']}")
 
+    templates = r.get("templates_created", [])
+    if templates:
+        print("\ncurated templates created (edit these manually):")
+        for t in sorted(templates):
+            print(f"  ✏  {t}")
+        print("  → run `scope doc fetch constraints` to view, then edit as needed")
+
     if r.get("unmatched_sections"):
         print(f"\nunmatched sections ({len(r['unmatched_sections'])}) "
               f"— not routed to any output file:")

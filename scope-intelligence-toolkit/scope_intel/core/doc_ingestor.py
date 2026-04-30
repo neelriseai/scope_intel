@@ -451,6 +451,137 @@ def _suggest_route(title: str, body_snippet: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Curated file templates
+# ---------------------------------------------------------------------------
+
+_CURATED_TEMPLATES: dict[str, str] = {
+    "constraints.md": """\
+# Constraints
+
+<!-- scope-intel: curated — edit this file to define project rules for Claude. -->
+<!-- Add <!-- route: constraints --> to any section in your design doc to auto-populate. -->
+
+## Non-negotiable Rules
+
+- TODO: List what Claude must NEVER do in this codebase
+- Example: Never commit secrets or credentials to git
+- Example: Always run tests before suggesting a file is complete
+
+## Code Style
+
+- TODO: Add language/style conventions
+- Example: Python — PEP 8, type hints required on all public functions
+- Example: Max line length 100 chars
+
+## Architecture Constraints
+
+- TODO: Add structural rules
+- Example: No direct DB access outside the `repositories/` layer
+- Example: All public API endpoints must be rate-limited
+
+---
+> Template created by `scope doc ingest`. Fill in your project constraints.
+> Claude reads this file before every session to understand what to avoid.
+""",
+
+    "current-phase.md": """\
+# Current Phase
+
+<!-- scope-intel: curated — update this file whenever the active sprint changes. -->
+<!-- Add <!-- route: current-phase --> to a section in your design doc to auto-populate. -->
+
+## Now Building
+
+- TODO: What feature/milestone is in active development right now?
+- Example: Phase 2 — RAG layer with pdfplumber + Ollama embedding
+
+## In Progress
+
+- [ ] TODO: List active work items
+- [ ] Example: Implement chunked PDF ingestion
+- [ ] Example: Wire vector store to query engine
+
+## Done This Phase
+
+- TODO: What was completed recently?
+- Example: Phase 1 — core scope index (files, symbols, features)
+
+## Blocked / Waiting
+
+- TODO: Any blockers or external dependencies?
+
+## Next Up
+
+- TODO: What comes after the current phase?
+
+---
+> Template created by `scope doc ingest`. Keep this file up to date as work progresses.
+> Claude reads this to understand what you are currently building.
+""",
+
+    "module-map.md": """\
+# Module Map
+
+<!-- scope-intel: curated — document your file/module ownership map here. -->
+<!-- Add <!-- route: module-map --> to a section in your design doc to auto-populate. -->
+
+## Core Modules
+
+| Module | Path | Owner | Purpose |
+|--------|------|-------|---------|
+| TODO   | src/ | team  | Main source |
+
+## Layer Ownership
+
+- **API layer** — `src/api/`  — handles HTTP requests, auth, rate limiting
+- **Service layer** — `src/services/` — business logic, orchestration
+- **Data layer** — `src/repositories/` — DB access, external APIs
+
+## Key Files
+
+- TODO: List files Claude should know about
+- Example: `src/core/engine.py` — central processing pipeline
+
+## File Naming Conventions
+
+- TODO: How are files named in this project?
+- Example: snake_case for Python, PascalCase for classes
+
+---
+> Template created by `scope doc ingest`. Fill in the module ownership map.
+> Claude uses this to quickly find the right file to edit.
+""",
+}
+
+
+def _ensure_curated_templates(
+    cur_dir: Path,
+    doc_name: str,
+    dry_run: bool,
+) -> list[str]:
+    """Create starter template files for any curated/ files not yet written.
+
+    Returns a list of relative paths for files that were templated.
+    Only creates files that don't already exist (never overwrites curated content).
+    """
+    if dry_run:
+        return []
+    cur_dir.mkdir(parents=True, exist_ok=True)
+    templated: list[str] = []
+    for filename, content in _CURATED_TEMPLATES.items():
+        out_path = cur_dir / filename
+        if not out_path.exists():
+            # Stamp with the source doc name so user knows the context
+            stamped = content.replace(
+                "> Template created by `scope doc ingest`.",
+                f"> Template created by `scope doc ingest` from `{doc_name}`.",
+            )
+            out_path.write_text(stamped, encoding="utf-8")
+            templated.append(str(out_path.relative_to(cur_dir.parent.parent)).replace("\\", "/"))
+    return templated
+
+
+# ---------------------------------------------------------------------------
 # CLAUDE.md updater
 # ---------------------------------------------------------------------------
 
@@ -858,6 +989,9 @@ def _ingest_with_llm(
         if features_added:
             store.write_json(repo_root, "features", existing_data)
 
+    # --- Curated templates — create starters for any missing curated files ---
+    templates_created = _ensure_curated_templates(cur_dir, doc_path.name, dry_run)
+
     # --- CLAUDE.md ---
     if not dry_run and update_claude_md:
         written = [f for f in generated_files if f.get("status") == "written"]
@@ -892,8 +1026,9 @@ def _ingest_with_llm(
         "llm_chunks_by_llm":     llm_count,
         "llm_chunks_fallback":   fallback_count,
         "conflicts_after_ingest": conflicts_after,
-        "global_context":        global_ctx,
-        "routing_table":         routing_table,
+        "global_context":         global_ctx,
+        "routing_table":          routing_table,
+        "templates_created":      templates_created,
     }
 
 
@@ -1206,6 +1341,9 @@ def _ingest_python_only(
         if features_added:
             store.write_json(repo_root, "features", existing_data)
 
+    # --- Curated templates — create starters for any missing curated files ---
+    templates_created = _ensure_curated_templates(cur_dir, doc_path.name, dry_run)
+
     # --- CLAUDE.md ---
     if not dry_run and update_claude_md:
         written = [f for f in generated_files if f["status"] == "written"]
@@ -1238,7 +1376,8 @@ def _ingest_python_only(
         "skipped":            skipped_files,
         "unmatched_sections": unmatched,
         "conflicts_after_ingest": conflicts_after,
-        "routing_table":      routing_table,
+        "routing_table":          routing_table,
+        "templates_created":      templates_created,
     }
     # Pass through PDF reader info if available ("pdfplumber" or "pypdf")
     if read_result.get("reader"):

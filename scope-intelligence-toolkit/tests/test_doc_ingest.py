@@ -30,6 +30,7 @@ from scope_intel.core.doc_ingestor import (
     _extract_memories,
     _extract_features,
     _suggest_route,
+    _CURATED_TEMPLATES,
     ingest_document,
 )
 
@@ -945,6 +946,76 @@ class TestDocHashAndIfChanged:
         )
         assert "source_hash" in index
         assert len(index["source_hash"]) == 16
+
+
+# ---------------------------------------------------------------------------
+# curated file templates
+# ---------------------------------------------------------------------------
+
+class TestCuratedTemplates:
+    """Test that missing curated/ files get starter templates after ingest."""
+
+    def test_templates_created_key_in_result(self, repo, md_file):
+        result = ingest_document(repo, md_file, overwrite=True)
+        assert "templates_created" in result
+        assert isinstance(result["templates_created"], list)
+
+    def test_templates_created_for_missing_curated_files(self, repo, tmp_path):
+        # Use a doc with NO curated-routable sections so all 3 templates are created
+        doc = tmp_path / "plain.md"
+        doc.write_text(
+            "# Overview\n\nSystem overview content.\n\n"
+            "## Architecture\n\nHigh-level system design.\n",
+            encoding="utf-8",
+        )
+        result = ingest_document(repo, doc, overwrite=True)
+        # At least some templates should be created
+        assert len(result["templates_created"]) > 0
+
+    def test_templates_not_created_when_curated_file_exists(self, repo, md_file):
+        # SAMPLE_MD has ## Constraints → writes curated/constraints.md
+        ingest_document(repo, md_file, overwrite=True)
+        constraints = repo / ".ai-context" / "curated" / "constraints.md"
+        assert constraints.exists()
+        # constraints.md from the doc should NOT be replaced by a template
+        content = constraints.read_text(encoding="utf-8")
+        # The doc-generated file has "Constraint" from the actual content
+        assert "TODO" not in content or "must not" in content.lower()
+
+    def test_template_files_exist_on_disk(self, repo, tmp_path):
+        doc = tmp_path / "simple.md"
+        doc.write_text("# Overview\n\nProject overview.\n\n## Architecture\n\nLayers.\n",
+                       encoding="utf-8")
+        ingest_document(repo, doc, overwrite=True)
+        cur_dir = repo / ".ai-context" / "curated"
+        assert cur_dir.exists()
+        # At least one of the three template files should exist
+        template_files = [f for f in _CURATED_TEMPLATES if (cur_dir / f).exists()]
+        assert len(template_files) > 0
+
+    def test_templates_not_overwritten_on_re_ingest(self, repo, tmp_path):
+        doc = tmp_path / "simple.md"
+        doc.write_text("# Overview\n\nProject overview.\n\n## Architecture\n\nLayers.\n",
+                       encoding="utf-8")
+        # First ingest — templates created
+        ingest_document(repo, doc, overwrite=True)
+        # Edit the constraints template manually
+        constraints = repo / ".ai-context" / "curated" / "constraints.md"
+        if constraints.exists():
+            constraints.write_text("# Constraints\n\nMy custom constraint.\n", encoding="utf-8")
+        # Second ingest — must NOT overwrite the hand-edited file
+        ingest_document(repo, doc, overwrite=True)
+        if constraints.exists():
+            content = constraints.read_text(encoding="utf-8")
+            assert "My custom constraint" in content
+
+    def test_dry_run_does_not_create_templates(self, repo, tmp_path):
+        doc = tmp_path / "simple.md"
+        doc.write_text("# Overview\n\nProject overview.\n", encoding="utf-8")
+        result = ingest_document(repo, doc, dry_run=True, overwrite=True)
+        assert result["templates_created"] == []
+        cur_dir = repo / ".ai-context" / "curated"
+        assert not cur_dir.exists()
 
 
 # ---------------------------------------------------------------------------
