@@ -377,6 +377,36 @@ TOOLS: list[dict] = [
             "required": ["name"],
         },
     },
+    {
+        "name": "doc_search",
+        "description": (
+            "Search all .ai-context/ files for a keyword or phrase (case-insensitive). "
+            "Returns matching lines with surrounding context. Useful for finding "
+            "which generated context file contains information about a specific topic."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "query": {
+                    "type": "string",
+                    "description": "Keyword or phrase to search for.",
+                },
+                "layer": {
+                    "type": "string",
+                    "enum": ["generated", "curated", "all"],
+                    "default": "all",
+                    "description": "Which layer to search (default: all).",
+                },
+                "context": {
+                    "type": "integer",
+                    "default": 2,
+                    "description": "Lines of context around each match (default: 2).",
+                },
+            },
+            "required": ["query"],
+        },
+    },
     # --- Phase 5 tools ---
     {
         "name": "mem_auto_capture",
@@ -631,6 +661,50 @@ def _call_tool(name: str, arguments: dict) -> dict:
                 "title": hit.get("title", hit["id"]),
                 "layer": hit.get("layer", "generated"),
                 "content": content, "chars": len(content)}
+    if name == "doc_search":
+        import re as _re
+        query = arguments["query"]
+        layer = arguments.get("layer", "all")
+        context_lines = int(arguments.get("context", 2))
+        ai_ctx = repo / ".ai-context"
+        if not ai_ctx.exists():
+            return {"error": "no .ai-context/ found — run doc_ingest first"}
+        pattern = _re.compile(_re.escape(query), _re.IGNORECASE)
+        results = []
+        def _search(directory: Path, lyr: str) -> None:
+            if not directory.exists(): return
+            for p in sorted(directory.glob("*.md")):
+                try:
+                    lines = p.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    continue
+                matches = []
+                for i, line in enumerate(lines):
+                    if pattern.search(line):
+                        matches.append({
+                            "line_no": i + 1,
+                            "line": line,
+                            "context_before": lines[max(0, i - context_lines): i],
+                            "context_after":  lines[i + 1: i + 1 + context_lines],
+                        })
+                if matches:
+                    results.append({
+                        "file_id": p.stem,
+                        "path":    str(p.relative_to(repo)).replace("\\", "/"),
+                        "layer":   lyr,
+                        "matches": matches,
+                        "match_count": len(matches),
+                    })
+        if layer in ("generated", "all"):
+            _search(ai_ctx / "generated", "generated")
+        if layer in ("curated", "all"):
+            _search(ai_ctx / "curated", "curated")
+        return {
+            "query": query,
+            "files_with_matches": len(results),
+            "total_matches": sum(r["match_count"] for r in results),
+            "results": results,
+        }
 
     # --- Phase 5 ---
     if name == "mem_auto_capture":

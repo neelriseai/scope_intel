@@ -242,6 +242,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show what would be removed without deleting anything.",
     )
 
+    # doc search — grep across generated .ai-context/ files
+    p_search = doc_sub.add_parser(
+        "search",
+        help="Search all .ai-context/ files for a keyword or phrase.",
+    )
+    p_search.add_argument("query", help="Keyword or phrase to search for (case-insensitive).")
+    p_search.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_search.add_argument(
+        "--layer", choices=["generated", "curated", "all"], default="all",
+        help="Which layer to search (default: all).",
+    )
+    p_search.add_argument(
+        "--context", type=int, default=2, metavar="N",
+        help="Lines of context around each match (default: 2).",
+    )
+    p_search.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # mem — MemPalace long-term memory
     p_mem = sub.add_parser("mem", help="MemPalace: long-term knowledge store.")
     mem_sub = p_mem.add_subparsers(dest="mem_cmd", required=True)
@@ -1215,6 +1232,87 @@ def _doc_fetch(repo: Path, name: str) -> dict:
     }
 
 
+def _doc_search(repo: Path, query: str, *, layer: str = "all",
+                context_lines: int = 2) -> dict:
+    """Search all .ai-context/ files for a keyword (case-insensitive).
+
+    Returns a list of matches: {file_id, path, layer, matches[]}.
+    Each match has {line_no, line, context_before[], context_after[]}.
+    """
+    ai_ctx = repo / ".ai-context"
+    if not ai_ctx.exists():
+        return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
+
+    import re as _re
+    pattern = _re.compile(_re.escape(query), _re.IGNORECASE)
+    results: list[dict] = []
+
+    def _search_dir(directory: Path, lyr: str) -> None:
+        if not directory.exists():
+            return
+        for p in sorted(directory.glob("*.md")):
+            rel = str(p.relative_to(repo)).replace("\\", "/")
+            try:
+                lines = p.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            matches: list[dict] = []
+            for i, line in enumerate(lines):
+                if pattern.search(line):
+                    before = lines[max(0, i - context_lines): i]
+                    after  = lines[i + 1: i + 1 + context_lines]
+                    matches.append({
+                        "line_no":        i + 1,
+                        "line":           line,
+                        "context_before": before,
+                        "context_after":  after,
+                    })
+            if matches:
+                results.append({
+                    "file_id": p.stem,
+                    "path":    rel,
+                    "layer":   lyr,
+                    "matches": matches,
+                    "match_count": len(matches),
+                })
+
+    if layer in ("generated", "all"):
+        _search_dir(ai_ctx / "generated", "generated")
+    if layer in ("curated", "all"):
+        _search_dir(ai_ctx / "curated", "curated")
+
+    total_matches = sum(r["match_count"] for r in results)
+    return {
+        "query":         query,
+        "files_searched": (
+            len(list((ai_ctx / "generated").glob("*.md")) if (ai_ctx / "generated").exists() else [])
+            + len(list((ai_ctx / "curated").glob("*.md")) if (ai_ctx / "curated").exists() else [])
+        ),
+        "files_with_matches": len(results),
+        "total_matches": total_matches,
+        "results":       results,
+    }
+
+
+def _fmt_doc_search(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    print(f"search: '{r['query']}'  —  {r['total_matches']} match(es) "
+          f"in {r['files_with_matches']}/{r['files_searched']} files")
+    for res in r["results"]:
+        print(f"\n{'─'*60}")
+        print(f"  [{res['layer']}] {res['path']}  ({res['match_count']} match(es))")
+        print(f"{'─'*60}")
+        for m in res["matches"]:
+            for ctx_line in m["context_before"]:
+                print(f"  {m['line_no'] - len(m['context_before'])+ m['context_before'].index(ctx_line)}│ {ctx_line}")
+            print(f"→ {m['line_no']}│ {m['line']}")
+            for ctx_line in m["context_after"]:
+                print(f"  {m['line_no'] + 1 + m['context_after'].index(ctx_line)}│ {ctx_line}")
+    if r["total_matches"] == 0:
+        print(f"  (no matches — try a different query or run `scope doc list`)")
+
+
 def _fmt_doc_fetch(r: dict) -> None:
     if "error" in r:
         print(r["error"]); return
@@ -1253,6 +1351,13 @@ def cmd_doc(args) -> int:
         repo = _resolve_repo(args.repo)
         result = _doc_fetch(repo, args.name)
         _emit(result, args.json, formatter=_fmt_doc_fetch)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "search":
+        repo = _resolve_repo(args.repo)
+        result = _doc_search(repo, args.query,
+                             layer=args.layer, context_lines=args.context)
+        _emit(result, args.json, formatter=_fmt_doc_search)
         return 0 if "error" not in result else 2
 
     if args.doc_cmd == "clear":
