@@ -117,6 +117,24 @@ The central brain sets high-level intent ("explore that crevice"). The arm execu
 **Philosophy: real intelligence is local. Central control is a bottleneck. Autonomy at the edge is strength.**
 A severed octopus arm still reacts for an hour — the local mind persists without the centre.
 
+### 🦍 Primate (Ape/Gorilla/Monkey) — The Transition Layer
+Famous for: being the nearest evolutionary link to humans — tool use, social politics, grief, culture.
+The primate is not fully animal and not fully human. It stands at the boundary.
+What made the crossing to human? Not stronger body. Not faster processing.
+**Two specific capabilities at the transition:** metacognition (knowing what you know — chimps request hints when uncertain) and theory of mind (knowing what another agent knows, believes, and intends). Together they unlock teaching, language, deception, trust, and cumulative culture.
+**Philosophy: the system that cannot model its own knowledge state will hallucinate confidently. The system that cannot model the other mind will answer the wrong question perfectly. The primate layer asks: "Do I actually know this?" and "What does the user actually need — not just what did they say?"**
+No other animal in the framework looks at itself. The primate is the only layer that does.
+
+### 🐢 Tortoise — The First Crossing
+Famous for: extreme longevity, surviving everything, and being among the first life to cross from water to land.
+The crossing required one solution: **carry what you need when the new environment provides none of it.**
+The shell is not armor. It is fused to the spine. The tortoise does not inhabit the shell — **the tortoise IS the shell.** You cannot separate them.
+Sea turtles navigate entire oceans back to the exact beach where they hatched — magnetic imprint at birth.
+In danger: complete withdrawal. Wait. The shell survives what the exposed animal would not.
+Brumation: near-zero metabolism, fully suspended, fully preserved. Revival: complete.
+**Philosophy: build the minimum viable self that survives any environment crossing. Not the full memory — the essential identity. What does the agent carry when everything the current environment provides is gone? That is the shell. Build the shell first.**
+The tortoise has outlasted every human civilization that has ever existed. Durability is the strategy.
+
 ---
 
 ## The Core Insight
@@ -136,6 +154,8 @@ A severed octopus arm still reacts for an hour — the local mind persists witho
 - Mouse    → *what nobody knew to look for* (experimental discovery)
 - Pigeon   → *how messages reliably reach the right place* (permanent routing)
 - Octopus  → *how to distribute without a centre* (autonomous agents)
+- Primate  → *do I actually know this? what does the user actually need?* (epistemic self-model + theory of mind)
+- Tortoise → *what does the agent carry across any environment crossing?* (portable shell + context continuity)
 
 And beneath all of these — a map of what KIND of knowing each layer handles:
 - Habitual knowing    → model weights (forward pass) — horse constitutional surface
@@ -443,6 +463,13 @@ This layer wraps the entire pipeline. It does not process data — it processes 
 | Sequential inference | `crow-inference/SKILL.md` | Crow 🐦‍⬛ | When retrieval fails, reason to construct the answer |
 | Purity / refinement | `swan-purity/SKILL.md` | Swan 🦢 | Remove noise, duplicates, stale, low-authority entries |
 | Experimental probe | `mouse-explorer/SKILL.md` | Mouse 🐭 | Discover new knowledge through direct experiment |
+
+### Epistemic Layers — Self-Knowledge and Identity
+
+| Layer | Skill File | Nature Model | Core Question |
+|---|---|---|---|
+| Epistemic self-model + theory of mind | `primate-metacognition/SKILL.md` | Primate 🦍 | Do I know this? What does the user actually need? |
+| Portable agent shell / crossing protocol | `tortoise-crossing/SKILL.md` | Tortoise 🐢 | What does the agent carry across any environment crossing? |
 
 ### Meta-Framework — What Type of Knowing Each Layer Handles
 
