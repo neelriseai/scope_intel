@@ -948,19 +948,42 @@ def _ingest_python_only(
             encoding="utf-8",
         )
 
-    # --- memories ---
+    # --- memories (per-section with section tag so mem-fetch works by feature) ---
     memories_added: list[str] = []
+    seen_notes: set[str] = set()
     if not dry_run:
-        for m in _extract_memories(text, doc_path.stem):
-            result = add_memory(
-                repo_root,
-                m["type"],
-                m["note"],
-                confidence=m.get("confidence", 0.75),
-                tags=m.get("tags", ["doc-ingest"]),
-            )
-            if "error" not in result:
-                memories_added.append(result["id"])
+        for s in sections:
+            section_body = s.get("body_text", "")
+            if not section_body.strip():
+                continue
+            section_slug = re.sub(r"[^a-z0-9]+", "-", s["title"].lower()).strip("-")
+            section_tag  = section_slug or doc_path.stem
+
+            for m in _extract_memories(section_body, section_tag):
+                note_lower = m["note"].lower()
+                if note_lower in seen_notes:
+                    continue
+                seen_notes.add(note_lower)
+
+                # Merge tags: base doc-ingest + section slug + doc name
+                tags = list(dict.fromkeys(
+                    ["doc-ingest", section_tag, doc_path.stem]
+                    + m.get("tags", [])
+                ))
+                result = add_memory(
+                    repo_root,
+                    m["type"],
+                    m["note"],
+                    confidence=m.get("confidence", 0.75),
+                    tags=tags,
+                )
+                if "error" not in result:
+                    memories_added.append(result["id"])
+
+                if len(memories_added) >= 120:  # global cap
+                    break
+            if len(memories_added) >= 120:
+                break
 
     # --- feature stubs ---
     features_added: list[str] = []
