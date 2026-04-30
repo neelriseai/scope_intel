@@ -1113,6 +1113,37 @@ def _fmt_ingest(r: dict) -> None:
         if len(r["unmatched_sections"]) > 10:
             print(f"  ... +{len(r['unmatched_sections']) - 10} more")
 
+    # Routing table — shown in dry-run mode to let users debug section routing
+    rt = r.get("routing_table", [])
+    if r.get("dry_run") and rt:
+        # Deduplicate: show each (section→file) pair once
+        seen_rt: set[tuple] = set()
+        rows: list[tuple[str, str, str]] = []
+        for entry in rt:
+            key = (entry["section"], entry.get("file") or "")
+            if key in seen_rt:
+                continue
+            seen_rt.add(key)
+            section = entry["section"]
+            layer   = entry.get("layer") or ""
+            f       = entry.get("file")
+            if f:
+                layer_tag = f"[{layer}]" if layer else ""
+                dest = f"{layer_tag} {f}"
+            else:
+                dest = "⚠ (unmatched)"
+            rows.append((section, dest, entry.get("via", "")))
+
+        col1 = max((len(r[0]) for r in rows), default=7)
+        col1 = min(col1, 50)
+        print(f"\nrouting table ({len(rows)} sections):")
+        print(f"  {'section':<{col1}}  {'→ output file'}")
+        print(f"  {'─'*col1}  {'─'*40}")
+        for section, dest, via in rows:
+            trunc = section[:col1]
+            via_tag = f"  (via {via})" if via else ""
+            print(f"  {trunc:<{col1}}  → {dest}{via_tag}")
+
 
 def _doc_list(repo: Path) -> dict:
     """Return manifest of .ai-context/ files for this repo.

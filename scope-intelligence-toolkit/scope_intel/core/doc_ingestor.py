@@ -519,6 +519,7 @@ def _ingest_with_llm(
     llm_count = 0
     fallback_count = 0
     unmatched: list[str] = []
+    routing_table: list[dict] = []  # {section, file, layer} — for dry-run display
     total_chunks = len(chunks)
 
     for i, chunk in enumerate(chunks, 1):
@@ -563,7 +564,22 @@ def _ingest_with_llm(
             else:
                 if chunk["title"] and chunk["title"] != "(preamble)":
                     unmatched.append(chunk["title"])
+                    routing_table.append({
+                        "section": chunk["title"],
+                        "file":    None,
+                        "layer":   None,
+                        "via":     "llm" if classification else "fallback",
+                    })
                 continue
+
+        # Record routing decision for dry-run table
+        rt_layer = TARGET_FILE_MAP.get(target_file, ("generated",))[0]
+        routing_table.append({
+            "section": chunk.get("heading_path") or chunk["title"],
+            "file":    target_file,
+            "layer":   rt_layer,
+            "via":     "llm" if (classification and classification.get("target_file")) else "fallback",
+        })
 
         if target_file not in buckets:
             buckets[target_file] = {
@@ -788,6 +804,7 @@ def _ingest_with_llm(
         "llm_chunks_fallback":   fallback_count,
         "conflicts_after_ingest": conflicts_after,
         "global_context":        global_ctx,
+        "routing_table":         routing_table,
     }
 
 
@@ -893,6 +910,7 @@ def _ingest_python_only(
     # bucket key: (dest_type, slug) → merged content
     buckets: dict[tuple, dict] = {}
     unmatched: list[str] = []
+    routing_table: list[dict] = []  # {section, file, layer} — for dry-run display
 
     for s in sections:
         dest_type, prefix, slug = _route_section(
@@ -905,7 +923,20 @@ def _ingest_python_only(
             else:
                 if s["title"] != "(preamble)" and s.get("body_text"):
                     unmatched.append(s["title"])
+                    routing_table.append({
+                        "section": s["title"],
+                        "level":   s.get("level", 1),
+                        "file":    None,
+                        "layer":   None,
+                    })
                 continue
+        filename = (f"{prefix}-{slug}.md" if prefix else f"{slug}.md")
+        routing_table.append({
+            "section": s["title"] if s["title"] != "(preamble)" else "(preamble → overview)",
+            "level":   s.get("level", 1),
+            "file":    filename,
+            "layer":   dest_type,
+        })
         key = (dest_type, slug)
         if key not in buckets:
             buckets[key] = {
@@ -1084,6 +1115,7 @@ def _ingest_python_only(
         "skipped": skipped_files,
         "unmatched_sections": unmatched,
         "conflicts_after_ingest": conflicts_after,
+        "routing_table": routing_table,
     }
     # Pass through PDF reader info if available ("pdfplumber" or "pypdf")
     if read_result.get("reader"):
