@@ -33,11 +33,17 @@ def get_repo_summary(repo_root: Path) -> dict:
 
 
 def get_feature_scope(repo_root: Path, query: str) -> dict:
+    import difflib as _dl
     data = _load(repo_root)
     feature = _resolve_feature(query, data["features"]["features"], data["aliases"])
     if not feature:
-        return {"error": f"No feature matched '{query}'.",
-                "available": [f["id"] for f in data["features"]["features"]]}
+        all_ids = [f["id"] for f in data["features"]["features"]]
+        suggestions = _dl.get_close_matches(query, all_ids, n=3, cutoff=0.4)
+        return {
+            "error": f"No feature matched '{query}'.",
+            "available": all_ids,
+            "suggestions": suggestions,
+        }
     fid = feature["id"]
     deps = data["dependencies"]["files"]
     syms = [s for s in data["symbols"]["symbols"] if s.get("feature") == fid]

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scope-intelligence-toolkit"
 version = "0.1.0"
-description = "Generic, language-adapter-based scope intelligence index for any code repository. Phase 1: CLI only."
+description = "Scope intelligence, repo memory, document context, compact sidecars, and MCP tools for reducing AI codebase tokens."
 requires-python = ">=3.9"
 authors = [{ name = "Scope Intelligence Toolkit" }]
 license = { text = "MIT" }

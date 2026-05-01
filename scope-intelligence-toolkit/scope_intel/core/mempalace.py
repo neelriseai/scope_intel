@@ -80,6 +80,7 @@ def add_memory(
     resolved: bool = False,
     # semantic-only
     confidence: float = 1.0,
+    half_life_days: Optional[int] = None,
     # procedure-only
     steps: Optional[list] = None,
 ) -> dict:
@@ -110,6 +111,8 @@ def add_memory(
     }
     if kind == "semantic":
         entry["confidence"] = round(float(confidence), 2)
+        if half_life_days is not None and int(half_life_days) > 0:
+            entry["half_life_days"] = int(half_life_days)
     if kind == "procedure":
         entry["steps"] = list(steps or [])
 
@@ -158,6 +161,42 @@ def _structural_slice(
         "files":    file_details,
         "symbols":  sorted(scope_symbols),
     }
+
+
+def _effective_confidence(entry: dict, default_half_life: int = 90) -> float:
+    """Compute decayed confidence for a semantic entry without mutating it.
+
+    Non-destructive: stored `confidence` is left alone. Effective value is
+    derived at fetch time so reinforcement (`scope mem touch`) and config
+    changes take effect immediately.
+
+    formula: base * 0.5^(age_days / half_life)
+    """
+    base = float(entry.get("confidence", 1.0))
+    half_life = int(entry.get("half_life_days") or default_half_life)
+    if half_life <= 0:
+        return base
+
+    ts_str = entry.get("ts", "")
+    try:
+        import datetime
+        ts_dt = datetime.datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
+        ts_dt = ts_dt.replace(tzinfo=datetime.timezone.utc)
+        age_days = max(0.0, (time.time() - ts_dt.timestamp()) / 86400.0)
+    except (ValueError, TypeError):
+        return base
+
+    return round(base * (0.5 ** (age_days / half_life)), 4)
+
+
+def _config_half_life(repo_root: Path) -> int:
+    """Read semantic_half_life from config, defaulting to 90 days."""
+    cfg = store.read_json(repo_root, "config", {})
+    try:
+        val = int(cfg.get("semantic_half_life", 90))
+        return val if val > 0 else 90
+    except (TypeError, ValueError):
+        return 90
 
 
 def fetch_relevant(
@@ -263,8 +302,17 @@ def fetch_relevant(
         else:
             episodic_matches.append(e)
 
-    # semantic: highest confidence first (timeless facts don't age)
-    semantic_matches.sort(key=lambda x: -x.get("confidence", 1.0))
+    # semantic: highest effective_confidence first (Phase 6.1 — exponential decay
+    # applied at fetch time, original `confidence` is never overwritten).
+    half_life = _config_half_life(repo_root)
+    decayed: list = []
+    for e in semantic_matches:
+        eff = _effective_confidence(e, default_half_life=half_life)
+        decayed_entry = dict(e)
+        decayed_entry["effective_confidence"] = eff
+        decayed.append(decayed_entry)
+    decayed.sort(key=lambda x: -x["effective_confidence"])
+    semantic_matches = decayed
 
     # procedure: most recently updated first
     procedure_matches.sort(key=lambda x: x.get("ts", ""), reverse=True)
@@ -583,6 +631,96 @@ def auto_capture_from_git(
         "dry_run": dry_run,
         "days_scanned": days,
         "entries": new_entries,
+    }
+
+
+def touch_memory(repo_root: Path, mem_id: str) -> dict:
+    """Reinforce a memory by refreshing its ts; preserves prior ts in history.
+
+    Effect: effective_confidence at next fetch jumps back to the base value.
+    The previous ts is appended to `reinforced_at` so we keep the history.
+
+    Returns the updated entry, or {error: ...} if not found.
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    entries = store.read_mempalace(repo_root)
+    target_idx: Optional[int] = None
+    for i, e in enumerate(entries):
+        if e.get("id") == mem_id:
+            target_idx = i
+            break
+    if target_idx is None:
+        return {"error": f"no memory with id '{mem_id}'"}
+
+    entry = dict(entries[target_idx])
+    old_ts = entry.get("ts", "")
+    new_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    history = list(entry.get("reinforced_at", []))
+    if old_ts:
+        history.append(old_ts)
+    entry["ts"] = new_ts
+    entry["reinforced_at"] = history
+
+    entries[target_idx] = entry
+    _rewrite_mempalace(repo_root, entries)
+    return entry
+
+
+def prune_memories(
+    repo_root: Path,
+    *,
+    below: float = 0.2,
+    dry_run: bool = False,
+    half_life_days: Optional[int] = None,
+) -> dict:
+    """Delete semantic memories whose *effective* confidence has dropped below a threshold.
+
+    Unlike ``decay_confidence`` (which rewrites stored values), this removes
+    entries entirely so the JSONL shrinks. Non-semantic entries are never pruned.
+
+    Args:
+        below:         Entries with effective_confidence < below are pruned.
+        dry_run:       Preview only — nothing is deleted.
+        half_life_days: Override the repo default (config.semantic_half_life).
+
+    Returns {pruned, kept, dry_run, removed[{id, note, effective_confidence}]}
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    hl = half_life_days if (half_life_days and half_life_days > 0) else _config_half_life(repo_root)
+
+    entries = store.read_mempalace(repo_root)
+    kept: list = []
+    removed: list = []
+
+    for e in entries:
+        if e.get("type") != "semantic":
+            kept.append(e)
+            continue
+        eff = _effective_confidence(e, default_half_life=hl)
+        if eff < below:
+            removed.append({
+                "id":                    e["id"],
+                "note":                  e.get("note", "")[:80],
+                "effective_confidence":  eff,
+                "confidence":            e.get("confidence", 1.0),
+            })
+        else:
+            kept.append(e)
+
+    if not dry_run and removed:
+        _rewrite_mempalace(repo_root, kept)
+
+    return {
+        "pruned":   len(removed) if not dry_run else 0,
+        "removed":  removed,
+        "kept":     len(kept),
+        "dry_run":  dry_run,
+        "threshold": below,
     }
 
 
@@ -939,3 +1077,109 @@ def detect_conflicts(
         "total": len(conflicts),
         "semantic_checked": len(semantics),
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.2 — Agent-triggered capture
+# ---------------------------------------------------------------------------
+
+#: Valid signal types for capture().  Each maps to a memory type + confidence cap.
+CAPTURE_SIGNALS: dict[str, dict] = {
+    "repeated-error":   {"type": "failure",  "confidence": None,  "cap": 0.7},
+    "surprising-fix":   {"type": "fix",      "confidence": None,  "cap": 0.7},
+    "validated-claim":  {"type": "semantic", "confidence": 0.7,   "cap": 0.7},
+    "repeated-lookup":  {"type": "procedure","confidence": None,   "cap": 0.7},
+    "scope-mismatch":   {"type": "note",     "confidence": None,   "cap": 0.7},
+}
+
+#: Max captures per signal per hour (rate-limit)
+_CAPTURE_RATE_LIMIT = 5
+
+
+def capture_memory(
+    repo_root: Path,
+    signal: str,
+    evidence: str,
+    *,
+    feature: Optional[str] = None,
+    file: Optional[str] = None,
+    symbol: Optional[str] = None,
+    author: str = "agent",
+    dry_run: bool = False,
+) -> dict:
+    """Record an agent-triggered memory capture.
+
+    Agents call this when they detect a high-signal event during a session.
+    Unlike ``add_memory`` (which is human-facing), capture:
+      - Validates against known signal types
+      - Caps confidence at 0.7 so agent entries never outrank human ones
+      - Rate-limits to ``_CAPTURE_RATE_LIMIT`` per signal per hour to prevent spam
+      - Tags the entry as source='agent' for filtering/pruning
+
+    Args:
+        signal:   One of CAPTURE_SIGNALS keys (repeated-error, validated-claim, etc.)
+        evidence: The text to record (e.g. error message, assertion text).
+        feature / file / symbol: Scope hints for routing.
+        author:   Agent identifier (default: "agent").
+        dry_run:  Preview without writing.
+
+    Returns entry dict on success, or {error: ...}.
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    if signal not in CAPTURE_SIGNALS:
+        valid = ", ".join(CAPTURE_SIGNALS)
+        return {"error": f"unknown signal '{signal}' — valid: {valid}"}
+
+    sig_meta = CAPTURE_SIGNALS[signal]
+    kind = sig_meta["type"]
+    confidence = sig_meta.get("confidence") or 0.7
+
+    # Rate-limit: count same-signal captures in the last hour
+    cutoff_ts = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ",
+        time.gmtime(time.time() - 3600),
+    )
+    existing = store.read_mempalace(repo_root)
+    recent_same_signal = sum(
+        1 for e in existing
+        if e.get("tags") and f"signal:{signal}" in e["tags"]
+        and e.get("ts", "") >= cutoff_ts
+    )
+    if recent_same_signal >= _CAPTURE_RATE_LIMIT:
+        return {
+            "error": (
+                f"rate limit reached: {_CAPTURE_RATE_LIMIT} '{signal}' captures "
+                f"in the last hour. Try again later or use `scope mem add` directly."
+            ),
+            "rate_limited": True,
+        }
+
+    tags = [f"signal:{signal}", "source:agent"]
+    scope_files = [file] if file else []
+    scope_features = [feature] if feature else []
+    scope_symbols = [symbol] if symbol else []
+
+    entry: dict = {
+        "id":       _make_id(evidence, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+        "ts":       time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "type":     kind,
+        "note":     evidence,
+        "scope": {
+            "files":    scope_files,
+            "features": scope_features,
+            "symbols":  scope_symbols,
+        },
+        "tags":    tags,
+        "author":  author,
+        "resolved": False,
+    }
+    if kind == "semantic":
+        entry["confidence"] = confidence
+
+    if dry_run:
+        return {"dry_run": True, "would_capture": entry}
+
+    store.append_mempalace(repo_root, entry)
+    return entry

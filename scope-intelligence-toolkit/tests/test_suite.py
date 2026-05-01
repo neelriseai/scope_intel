@@ -38,6 +38,13 @@ from scope_intel.core.query_engine import (
 from scope_intel.core.tracker import compute_savings_summary, compute_global_summary, log_query
 from scope_intel.core.reporter import format_terminal, format_html, format_global_terminal, format_global_html
 from scope_intel.core.diff import compute_diff_scope
+from scope_intel.core.compact_context import (
+    build_compact_artifacts,
+    compact_stats,
+    decompress_compact_file,
+    get_inventory,
+    validate_compact_artifacts,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +319,8 @@ class TestMCPServer:
         r = json.loads(out)
         names = [t["name"] for t in r["result"]["tools"]]
         assert "scope_summary" in names
+        assert "scope_inventory" in names
+        assert "compact_build" in names
         assert "mem_add" in names
         assert "mem_fetch" in names
 
@@ -474,6 +483,444 @@ class TestMemPalaceFetch:
         r = fetch_relevant(repo)
         total = r["total"]
         assert total >= 2
+
+
+class TestMemPalaceConfidenceDecay:
+    """Phase 6.1 — non-destructive effective_confidence at fetch time."""
+
+    def _backdate(self, repo, mem_id: str, days: int) -> None:
+        """Rewrite ts on a memory entry to N days ago (for testing decay only)."""
+        import datetime
+        entries = store.read_mempalace(repo)
+        new_ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        new_ts_str = new_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+        for e in entries:
+            if e.get("id") == mem_id:
+                e["ts"] = new_ts_str
+        # rewrite the JSONL
+        path = store.mempalace_path(repo) if hasattr(store, "mempalace_path") else \
+               (repo / ".scope-intelligence" / "mempalace.jsonl")
+        path.write_text(
+            "\n".join(json.dumps(e) for e in entries) + "\n",
+            encoding="utf-8",
+        )
+
+    def test_effective_confidence_present_on_semantic(self, repo):
+        add_memory(repo, "semantic", "fresh fact", confidence=0.9, features=["auth"])
+        r = fetch_relevant(repo, feature="auth")
+        sem = r["layers"]["semantic"]
+        assert len(sem) >= 1
+        assert "effective_confidence" in sem[0]
+
+    def test_fresh_entry_effective_equals_base(self, repo):
+        add_memory(repo, "semantic", "right now", confidence=0.8, features=["auth"])
+        r = fetch_relevant(repo, feature="auth")
+        sem = r["layers"]["semantic"][0]
+        # Newly-added: age ~ 0, decay factor ~ 1.0
+        assert abs(sem["effective_confidence"] - 0.8) < 0.01
+        # Stored confidence is unchanged
+        assert sem["confidence"] == 0.8
+
+    def test_old_entry_effective_below_base(self, repo):
+        e = add_memory(repo, "semantic", "ancient fact",
+                       confidence=0.9, features=["auth"])
+        # Push timestamp 180 days back — with default 90d half-life, factor = 0.25
+        self._backdate(repo, e["id"], days=180)
+        r = fetch_relevant(repo, feature="auth")
+        sem = next(x for x in r["layers"]["semantic"] if x["id"] == e["id"])
+        # Stored value is untouched...
+        assert sem["confidence"] == 0.9
+        # ...but effective is decayed
+        assert sem["effective_confidence"] < 0.5
+        assert sem["effective_confidence"] > 0.0
+
+    def test_sort_order_uses_effective_confidence(self, repo):
+        """A high base confidence that's decayed should rank below a fresh lower one."""
+        old = add_memory(repo, "semantic", "old high",
+                         confidence=0.95, features=["auth"])
+        add_memory(repo, "semantic", "fresh moderate",
+                   confidence=0.6, features=["auth"])
+        # Decay the old one severely (5 half-lives back ~ 99% loss)
+        self._backdate(repo, old["id"], days=450)
+        r = fetch_relevant(repo, feature="auth")
+        sem = r["layers"]["semantic"]
+        notes = [s["note"] for s in sem]
+        assert notes[0] == "fresh moderate", notes
+
+    def test_per_entry_half_life_override(self, repo):
+        """A short half-life makes the effective drop faster than the default."""
+        e = add_memory(repo, "semantic", "expires fast",
+                       confidence=0.9, features=["auth"], half_life_days=30)
+        # 60 days = 2 half-lives → effective ~ 0.225
+        self._backdate(repo, e["id"], days=60)
+        r = fetch_relevant(repo, feature="auth")
+        sem = next(x for x in r["layers"]["semantic"] if x["id"] == e["id"])
+        assert sem["confidence"] == 0.9
+        assert 0.15 < sem["effective_confidence"] < 0.30
+
+    def test_config_half_life_used_when_no_override(self, repo):
+        """Setting config.semantic_half_life affects every entry without an override."""
+        cfg = store.read_json(repo, "config", store.default_config())
+        cfg["semantic_half_life"] = 30  # aggressive decay repo-wide
+        store.write_json(repo, "config", cfg)
+
+        e = add_memory(repo, "semantic", "uses config decay",
+                       confidence=0.9, features=["auth"])
+        self._backdate(repo, e["id"], days=60)  # 2 half-lives at 30
+        r = fetch_relevant(repo, feature="auth")
+        sem = next(x for x in r["layers"]["semantic"] if x["id"] == e["id"])
+        assert sem["effective_confidence"] < 0.30
+
+    def test_entry_without_ts_keeps_base(self, repo):
+        """Defensive: malformed entries shouldn't blow up fetch."""
+        from scope_intel.core.mempalace import _effective_confidence
+        eff = _effective_confidence({"confidence": 0.7, "ts": "not-a-date"})
+        assert eff == 0.7
+
+
+class TestMemTouch:
+    """Phase 6.1 — scope mem touch reinforces a memory by resetting ts."""
+
+    def _backdate(self, repo, mem_id: str, days: int) -> None:
+        import datetime
+        entries = store.read_mempalace(repo)
+        new_ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        new_ts_str = new_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+        for e in entries:
+            if e.get("id") == mem_id:
+                e["ts"] = new_ts_str
+        path = repo / ".scope-intelligence" / "mempalace.jsonl"
+        path.write_text(
+            "\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8"
+        )
+
+    def test_touch_updates_ts(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        import datetime
+        e = add_memory(repo, "semantic", "aging fact", confidence=0.8, features=["auth"])
+        self._backdate(repo, e["id"], days=100)
+
+        result = touch_memory(repo, e["id"])
+        assert "error" not in result, result
+        # ts should be very recent (within last 5 seconds)
+        ts = datetime.datetime.strptime(result["ts"], "%Y-%m-%dT%H:%M:%SZ")
+        age = (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - ts).total_seconds()
+        assert age < 5
+
+    def test_touch_records_old_ts_in_history(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        e = add_memory(repo, "semantic", "tracked fact", confidence=0.9, features=["auth"])
+        self._backdate(repo, e["id"], days=50)
+        # Read the backdated ts — that's what touch will move into history
+        entries = store.read_mempalace(repo)
+        backdated_ts = next(x["ts"] for x in entries if x["id"] == e["id"])
+
+        result = touch_memory(repo, e["id"])
+        assert "reinforced_at" in result
+        # The backdated ts (the one that was live before touch) should be in history
+        assert backdated_ts in result["reinforced_at"]
+
+    def test_touch_accumulates_history(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        e = add_memory(repo, "semantic", "multi-touch", confidence=0.9, features=["auth"])
+        touch_memory(repo, e["id"])
+        result = touch_memory(repo, e["id"])
+        assert len(result.get("reinforced_at", [])) >= 2
+
+    def test_touch_raises_effective_confidence(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        from scope_intel.core.mempalace import _effective_confidence
+        e = add_memory(repo, "semantic", "decayed", confidence=0.9, features=["auth"])
+        self._backdate(repo, e["id"], days=270)  # 3 half-lives → ~0.11 effective
+        # Verify it actually decayed
+        entries = store.read_mempalace(repo)
+        decayed_entry = next(x for x in entries if x["id"] == e["id"])
+        eff_before = _effective_confidence(decayed_entry)
+        assert eff_before < 0.2
+
+        touch_memory(repo, e["id"])
+        entries = store.read_mempalace(repo)
+        fresh = next(x for x in entries if x["id"] == e["id"])
+        eff_after = _effective_confidence(fresh)
+        assert eff_after > eff_before
+
+    def test_touch_unknown_id_returns_error(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        result = touch_memory(repo, "mp_nonexistent")
+        assert "error" in result
+
+
+class TestMemPrune:
+    """Phase 6.1 — scope mem prune deletes semantics below effective threshold."""
+
+    def _backdate(self, repo, mem_id: str, days: int) -> None:
+        import datetime
+        entries = store.read_mempalace(repo)
+        new_ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        for e in entries:
+            if e.get("id") == mem_id:
+                e["ts"] = new_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+        path = repo / ".scope-intelligence" / "mempalace.jsonl"
+        path.write_text(
+            "\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8"
+        )
+
+    def test_prune_removes_decayed_entries(self, repo):
+        from scope_intel.core.mempalace import prune_memories
+        old = add_memory(repo, "semantic", "ancient", confidence=0.9, features=["auth"])
+        add_memory(repo, "semantic", "fresh", confidence=0.9, features=["auth"])
+        # age old one 5 half-lives → effective ≈ 0.028
+        self._backdate(repo, old["id"], days=450)
+
+        result = prune_memories(repo, below=0.05)
+        assert "error" not in result, result
+        assert result["pruned"] == 1
+        assert result["removed"][0]["id"] == old["id"]
+        remaining = store.read_mempalace(repo)
+        ids = [e["id"] for e in remaining]
+        assert old["id"] not in ids
+
+    def test_dry_run_does_not_delete(self, repo):
+        from scope_intel.core.mempalace import prune_memories
+        old = add_memory(repo, "semantic", "would-be-pruned",
+                         confidence=0.9, features=["auth"])
+        self._backdate(repo, old["id"], days=450)
+
+        result = prune_memories(repo, below=0.05, dry_run=True)
+        assert result["dry_run"] is True
+        assert result["pruned"] == 0          # nothing actually deleted
+        assert len(result["removed"]) == 1    # preview shows it
+        remaining = store.read_mempalace(repo)
+        ids = [e["id"] for e in remaining]
+        assert old["id"] in ids              # still there
+
+    def test_non_semantic_never_pruned(self, repo):
+        from scope_intel.core.mempalace import prune_memories
+        bug = add_memory(repo, "bug", "old bug", features=["auth"])
+        self._backdate(repo, bug["id"], days=999)
+
+        result = prune_memories(repo, below=0.99)
+        assert result["pruned"] == 0
+        remaining_ids = [e["id"] for e in store.read_mempalace(repo)]
+        assert bug["id"] in remaining_ids
+
+    def test_prune_result_keys(self, repo):
+        from scope_intel.core.mempalace import prune_memories
+        add_memory(repo, "semantic", "some fact", confidence=0.9, features=["auth"])
+        result = prune_memories(repo, below=0.0)  # threshold 0 = nothing pruned
+        for key in ("pruned", "kept", "dry_run", "threshold", "removed"):
+            assert key in result
+
+    def test_half_life_override_affects_pruning(self, repo):
+        """A shorter override half-life decays faster, pruning entries that default wouldn't."""
+        from scope_intel.core.mempalace import prune_memories
+        e = add_memory(repo, "semantic", "medium age",
+                       confidence=0.9, features=["auth"])
+        # 45 days back — with default 90d HL: eff ≈ 0.636 (safe)
+        # with 10d HL: eff ≈ 0.9 * 0.5^(45/10) ≈ 0.019 (prunable)
+        self._backdate(repo, e["id"], days=45)
+
+        safe = prune_memories(repo, below=0.05)           # default HL=90
+        assert safe["pruned"] == 0
+
+        aggressive = prune_memories(repo, below=0.05, half_life_days=10)
+        assert aggressive["pruned"] == 1
+
+
+class TestMemCapture:
+    """Phase 6.2 — agent-triggered signal-based captures."""
+
+    def test_capture_valid_signal(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "repeated-error",
+                                "TypeError in payment.py line 42")
+        assert "error" not in result, result
+        assert result["type"] == "failure"
+        assert "signal:repeated-error" in result["tags"]
+        assert "source:agent" in result["tags"]
+
+    def test_capture_validated_claim_sets_confidence(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "validated-claim",
+                                "JWT signing uses HS256 — confirmed by user")
+        assert result["type"] == "semantic"
+        assert result["confidence"] == 0.7
+
+    def test_capture_confidence_capped_at_0_7(self, repo):
+        """All agent captures must be capped so they never outrank human entries."""
+        from scope_intel.core.mempalace import capture_memory, CAPTURE_SIGNALS
+        for signal in CAPTURE_SIGNALS:
+            result = capture_memory(repo, signal, f"evidence for {signal}")
+            assert "error" not in result or result.get("rate_limited"), result
+            conf = result.get("confidence", 0)  # only semantic has it
+            if conf:
+                assert conf <= 0.7, f"confidence > 0.7 for {signal}"
+
+    def test_capture_unknown_signal_returns_error(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "made-up-signal", "some evidence")
+        assert "error" in result
+
+    def test_capture_dry_run_no_write(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "surprising-fix",
+                                "fixed off-by-one in paginator", dry_run=True)
+        assert result.get("dry_run") is True
+        assert "would_capture" in result
+        remaining = store.read_mempalace(repo)
+        assert len(remaining) == 0  # nothing written
+
+    def test_capture_scope_hints_stored(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "scope-mismatch",
+                                "feature mismatch detected",
+                                feature="billing", file="src/billing/payment.py")
+        assert result["scope"]["features"] == ["billing"]
+        assert result["scope"]["files"] == ["src/billing/payment.py"]
+
+    def test_capture_rate_limit(self, repo):
+        from scope_intel.core.mempalace import capture_memory, _CAPTURE_RATE_LIMIT
+        # Fill up the rate limit
+        for i in range(_CAPTURE_RATE_LIMIT):
+            r = capture_memory(repo, "repeated-error", f"error #{i}")
+            assert "error" not in r or r.get("rate_limited"), r
+        # Next one should be rate-limited
+        r = capture_memory(repo, "repeated-error", "over the limit")
+        assert r.get("rate_limited") is True
+
+
+class TestFederation:
+    """Phase 6.3 — cross-repo memory federation."""
+
+    @pytest.fixture()
+    def clean_manifest(self, monkeypatch, tmp_path):
+        """Redirect the federation manifest to a temp dir so tests don't pollute ~/.scope-intelligence."""
+        from scope_intel.core import federation as fed_mod
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        monkeypatch.setattr(
+            fed_mod, "_federation_path",
+            lambda: fake_home / ".scope-intelligence" / "federation.json",
+        )
+        # Ensure the dir exists
+        (fake_home / ".scope-intelligence").mkdir(parents=True, exist_ok=True)
+        return fake_home
+
+    def test_add_repo(self, repo, clean_manifest):
+        from scope_intel.core.federation import federation_add, federation_list
+        result = federation_add(str(repo), alias="main-repo")
+        assert "error" not in result, result
+        assert result["ok"] is True
+        manifest = federation_list()
+        aliases = [r["alias"] for r in manifest["repos"]]
+        assert "main-repo" in aliases
+
+    def test_add_nonexistent_path_errors(self, clean_manifest):
+        from scope_intel.core.federation import federation_add
+        result = federation_add("/no/such/path", alias="ghost")
+        assert "error" in result
+
+    def test_duplicate_alias_different_path_errors(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import federation_add
+        other = tmp_path / "other"
+        other.mkdir()
+        federation_add(str(repo), alias="shared")
+        result = federation_add(str(other), alias="shared")
+        assert "error" in result
+
+    def test_remove_repo(self, repo, clean_manifest):
+        from scope_intel.core.federation import federation_add, federation_remove, federation_list
+        federation_add(str(repo), alias="to-remove")
+        result = federation_remove("to-remove")
+        assert "error" not in result
+        manifest = federation_list()
+        assert not any(r["alias"] == "to-remove" for r in manifest["repos"])
+
+    def test_remove_also_clears_links(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import (
+            federation_add, federation_link, federation_remove, federation_list
+        )
+        sat = tmp_path / "sat"
+        sat.mkdir()
+        federation_add(str(repo), alias="main")
+        federation_add(str(sat),  alias="satellite")
+        federation_link("main", "satellite")
+        federation_remove("satellite")
+        manifest = federation_list()
+        assert not any(lk["to"] == "satellite" for lk in manifest["links"])
+
+    def test_link_creates_entry(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import federation_add, federation_link, federation_list
+        sat = tmp_path / "sat"
+        sat.mkdir()
+        federation_add(str(repo), alias="main")
+        federation_add(str(sat),  alias="satellite")
+        federation_link("main", "satellite", scope="semantic")
+        manifest = federation_list()
+        assert any(
+            lk["from"] == "main" and lk["to"] == "satellite" and lk["scope"] == "semantic"
+            for lk in manifest["links"]
+        )
+
+    def test_link_unknown_alias_errors(self, repo, clean_manifest):
+        from scope_intel.core.federation import federation_add, federation_link
+        federation_add(str(repo), alias="main")
+        result = federation_link("main", "no-such-alias")
+        assert "error" in result
+
+    def test_federated_fetch_returns_remote_entries(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import (
+            federation_add, federation_link, federated_fetch
+        )
+        from scope_intel.core.mempalace import add_memory
+
+        # Set up a satellite repo with its own indexed store
+        sat = tmp_path / "satellite"
+        sat.mkdir()
+        store.ensure_index_dir(sat)
+        store.write_json(sat, "config", store.default_config())
+        add_memory(sat, "semantic", "shared constraint: always validate",
+                   confidence=0.9, features=["auth"])
+
+        federation_add(str(repo), alias="main")
+        federation_add(str(sat),  alias="satellite")
+        federation_link("main", "satellite", scope="semantic")
+
+        result = federated_fetch(repo)
+        assert result["local_alias"] == "main"
+        assert result["total_remote"] == 1
+        entry = result["sources"][0]["entries"][0]
+        assert entry["_federation_source"] == "satellite"
+        assert entry["note"] == "shared constraint: always validate"
+
+    def test_federated_fetch_scope_filter(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import (
+            federation_add, federation_link, federated_fetch
+        )
+        from scope_intel.core.mempalace import add_memory
+
+        sat = tmp_path / "satellite"
+        sat.mkdir()
+        store.ensure_index_dir(sat)
+        store.write_json(sat, "config", store.default_config())
+        add_memory(sat, "semantic", "semantic fact", confidence=0.8)
+        add_memory(sat, "bug", "a bug", features=["auth"])
+
+        federation_add(str(repo), alias="main")
+        federation_add(str(sat),  alias="satellite")
+        # Only pull semantic from satellite
+        federation_link("main", "satellite", scope="semantic")
+
+        result = federated_fetch(repo)
+        types = [e["type"] for e in result["sources"][0]["entries"]]
+        assert "semantic" in types
+        assert "bug" not in types
+
+    def test_unregistered_repo_returns_note(self, repo, clean_manifest):
+        from scope_intel.core.federation import federated_fetch
+        result = federated_fetch(repo)
+        assert result["local_alias"] is None
+        assert result["total_remote"] == 0
 
 
 class TestMemPalaceList:
@@ -796,3 +1243,241 @@ class TestConflictDetection:
     def test_not_indexed_returns_error(self, tmp_path):
         r = detect_conflicts(tmp_path)
         assert "error" in r
+
+
+# ===========================================================================
+# Graph renderer
+# ===========================================================================
+
+@pytest.fixture()
+def class_repo(tmp_path):
+    """Repo with classes, inheritance, and a call edge for graph tests."""
+    (tmp_path / "models.py").write_text(
+        "class Animal:\n"
+        "    def speak(self): pass\n"
+        "    def move(self): pass\n\n"
+        "class Dog(Animal):\n"
+        "    def speak(self): self.move()\n"
+        "    def fetch(self): pass\n\n"
+        "class Cat(Animal):\n"
+        "    def speak(self): pass\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "runner.py").write_text(
+        "from models import Dog\n"
+        "def run():\n"
+        "    d = Dog()\n"
+        "    d.speak()\n",
+        encoding="utf-8",
+    )
+    store.ensure_index_dir(tmp_path)
+    store.write_json(tmp_path, "config", store.default_config())
+    build_index(tmp_path)
+    return tmp_path
+
+
+class TestGraphRenderer:
+    def test_class_diagram_mermaid_contains_class_names(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert "error" not in r, r.get("error")
+        assert r["format"] == "mermaid"
+        assert "classDiagram" in r["diagram"]
+        assert "Animal" in r["diagram"]
+        assert "Dog" in r["diagram"]
+        assert "Cat" in r["diagram"]
+
+    def test_class_diagram_lists_methods(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert "error" not in r
+        # methods should appear inside the class block
+        assert "speak" in r["diagram"]
+        assert "fetch" in r["diagram"]
+
+    def test_class_diagram_inheritance_edge(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert "error" not in r
+        # Mermaid inheritance: Child <|-- Parent (or reverse)
+        assert "<|--" in r["diagram"]
+
+    def test_class_diagram_dot_format(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py",
+                         kind="class", format="dot")
+        assert "error" not in r
+        assert r["format"] == "dot"
+        assert "digraph" in r["diagram"]
+        assert "Animal" in r["diagram"]
+
+    def test_deps_graph_mermaid(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="runner.py", kind="deps")
+        assert "error" not in r
+        assert "graph TD" in r["diagram"]
+        # runner.py should appear as a node
+        assert "runner" in r["diagram"].lower()
+
+    def test_call_graph_mermaid(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="symbol", query="speak", kind="calls")
+        assert "error" not in r
+        assert "graph LR" in r["diagram"]
+        assert "speak" in r["diagram"].lower()
+
+    def test_fenced_block_wraps_diagram(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert r["fenced"].startswith("```mermaid\n")
+        assert r["fenced"].endswith("\n```")
+
+    def test_unknown_kind_returns_error(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="unknown")  # type: ignore[arg-type]
+        assert "error" in r
+
+    def test_not_indexed_returns_error(self, tmp_path):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(tmp_path, target="file", query="x.py", kind="class")
+        assert "error" in r
+
+    def test_missing_file_returns_error(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="nonexistent.py", kind="class")
+        assert "error" in r
+
+    def test_bases_captured_in_index(self, class_repo):
+        """Regression: python_adapter must store bases so graph can draw inheritance."""
+        syms = store.read_json(class_repo, "symbols", {"symbols": []})["symbols"]
+        dog = next((s for s in syms if s["name"] == "Dog"), None)
+        assert dog is not None, "Dog class not indexed"
+        assert "Animal" in dog.get("bases", []), (
+            f"Dog.bases={dog.get('bases')} — inheritance not captured by adapter"
+        )
+
+    def test_node_and_edge_counts_returned(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert isinstance(r["nodes"], int) and r["nodes"] > 0
+        assert isinstance(r["edges"], int)
+        assert isinstance(r["truncated"], bool)
+
+
+# ===========================================================================
+# Compact context sidecars and inventory
+# ===========================================================================
+
+class TestCompactContext:
+    def test_build_ai_context_sidecar_keeps_original(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        original = "# Overview\n\nThe system is responsible for indexing repositories.\n"
+        source = gen / "overview.md"
+        source.write_text(original, encoding="utf-8")
+
+        result = build_compact_artifacts(repo, target="ai-context")
+
+        assert result["total_written"] == 1
+        assert source.read_text(encoding="utf-8") == original
+        compact_rel = result["written"][0]["compact"]
+        assert (repo / compact_rel).exists()
+        assert result["source_tokens_est"] > 0
+        assert result["dsl_tokens_est"] > 0
+
+    def test_validate_ai_context_sidecar_round_trips_exact_text(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        original = "# Contract\n\nMust always validate payloads before persist.\n"
+        (gen / "contract.md").write_text(original, encoding="utf-8")
+        build_compact_artifacts(repo, target="ai-context")
+
+        result = validate_compact_artifacts(repo, target="ai-context")
+
+        assert result["ok"] is True
+        assert result["failed"] == 0
+
+    def test_validate_fails_when_source_changes_after_compact(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        source = gen / "roadmap.md"
+        source.write_text("# Roadmap\n\nPhase 1 complete.\n", encoding="utf-8")
+        build_compact_artifacts(repo, target="ai-context")
+        source.write_text("# Roadmap\n\nPhase 2 changed.\n", encoding="utf-8")
+
+        result = validate_compact_artifacts(repo, target="ai-context")
+
+        assert result["ok"] is False
+        assert result["failed"] == 1
+
+    def test_decompress_compact_file_returns_original_payload(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        original = "# Memory\n\nRedis cache ttl 24h.\n"
+        source = gen / "memory.md"
+        source.write_text(original, encoding="utf-8")
+        built = build_compact_artifacts(repo, target="ai-context")
+
+        result = decompress_compact_file(repo / built["written"][0]["compact"])
+
+        assert result["content"] == original
+        assert result["meta"]["source"].endswith("memory.md")
+
+    def test_build_skill_sidecar(self, repo):
+        skill_dir = repo / ".agents" / "skills" / "sample"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "# Skill\n\nUse this skill when debugging authentication issues.\n",
+            encoding="utf-8",
+        )
+
+        result = build_compact_artifacts(repo, target="skills")
+
+        assert result["total_written"] == 1
+        assert result["written"][0]["kind"] == "skill"
+        assert validate_compact_artifacts(repo, target="skills")["ok"] is True
+
+    def test_build_memory_sidecar(self, repo):
+        add_memory(repo, "semantic", "auth uses JWT signing", confidence=0.9)
+
+        result = build_compact_artifacts(repo, target="memory")
+
+        assert result["total_written"] == 1
+        assert result["written"][0]["kind"] == "memory"
+        assert validate_compact_artifacts(repo, target="memory")["ok"] is True
+
+    def test_compact_stats_aggregates_sidecars(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        (gen / "overview.md").write_text("# Overview\n\nUseful context.\n", encoding="utf-8")
+        build_compact_artifacts(repo, target="ai-context")
+
+        result = compact_stats(repo, target="ai-context")
+
+        assert result["total"] == 1
+        assert result["source_tokens_est"] > 0
+        assert result["dsl_tokens_est"] > 0
+
+
+class TestInventory:
+    def test_inventory_lists_files_without_source_scan(self, repo):
+        result = get_inventory(repo, include_symbols=False)
+
+        assert "error" not in result
+        assert result["totals"]["files"] >= 3
+        assert "symbols" not in result
+        assert any(f["file"] == "src/auth/login.py" for f in result["files"])
+
+    def test_inventory_lists_classes(self, class_repo):
+        result = get_inventory(class_repo)
+
+        assert result["totals"]["classes"] == 3
+        names = [c["name"] for c in result["classes"]]
+        assert {"Animal", "Dog", "Cat"}.issubset(set(names))
+
+    def test_inventory_feature_filter(self, repo):
+        result = get_inventory(repo, feature="auth")
+
+        assert "error" not in result
+        assert result["totals"]["files"] >= 1
+        assert all(f["feature"] == "auth" for f in result["files"])
