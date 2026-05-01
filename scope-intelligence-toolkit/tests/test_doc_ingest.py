@@ -26,6 +26,7 @@ from scope_intel.core.llm_client import NullLLMClient, get_client
 from scope_intel.cli import (
     _doc_list, _doc_fetch, _doc_search, _doc_fetch_for, _doc_diff,
     _doc_pin, _doc_unpin, _read_pinned,
+    _doc_annotate,
 )
 from scope_intel.core.doc_ingestor import (
     _route_section,
@@ -1635,3 +1636,97 @@ class TestDocPin:
         ingest_document(repo, md_file, overwrite=True)
         pinned = _read_pinned(repo)
         assert rel in pinned, "pin was lost after re-ingest"
+
+
+# ---------------------------------------------------------------------------
+# TestDocAnnotate
+# ---------------------------------------------------------------------------
+
+class TestDocAnnotate:
+    """Tests for _doc_annotate — file-level annotations on .ai-context/ entries."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def _first_generated_id(self, repo):
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        files = [f for f in idx["files"] if f["layer"] == "generated"]
+        assert files
+        return files[0]["id"]
+
+    def test_view_empty_annotations(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        result = _doc_annotate(repo, fid)
+        assert "error" not in result
+        assert result["action"] == "view"
+        assert result["annotations"] == []
+
+    def test_add_annotation_returns_added(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        result = _doc_annotate(repo, fid, add_note="Reviewed in sprint 12", author="alice")
+        assert "error" not in result
+        assert result["action"] == "added"
+        assert len(result["annotations"]) == 1
+        ann = result["annotations"][0]
+        assert ann["note"] == "Reviewed in sprint 12"
+        assert ann["author"] == "alice"
+        assert "ts" in ann
+
+    def test_annotation_persists_in_index_json(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        _doc_annotate(repo, fid, add_note="Needs update for v2")
+        # Read annotation back via a second call
+        result = _doc_annotate(repo, fid)
+        assert len(result["annotations"]) == 1
+        assert result["annotations"][0]["note"] == "Needs update for v2"
+
+    def test_multiple_annotations_accumulate(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        _doc_annotate(repo, fid, add_note="First note")
+        _doc_annotate(repo, fid, add_note="Second note")
+        result = _doc_annotate(repo, fid)
+        assert len(result["annotations"]) == 2
+        notes = [a["note"] for a in result["annotations"]]
+        assert "First note" in notes
+        assert "Second note" in notes
+
+    def test_clear_removes_all_annotations(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        _doc_annotate(repo, fid, add_note="A note")
+        result = _doc_annotate(repo, fid, clear=True)
+        assert result["action"] == "cleared"
+        assert result["annotations"] == []
+        # Verify persistence
+        result2 = _doc_annotate(repo, fid)
+        assert result2["annotations"] == []
+
+    def test_unknown_file_returns_error(self, repo, md_file):
+        self._ingest(repo, md_file)
+        result = _doc_annotate(repo, "xyzzy-nonexistent")
+        assert "error" in result
+
+    def test_curated_file_annotation_stored_separately(self, repo, md_file):
+        self._ingest(repo, md_file)
+        cur_dir = repo / ".ai-context" / "curated"
+        assert cur_dir.exists(), "expected curated/ after ingest"
+        # Annotate a curated file
+        result = _doc_annotate(repo, "constraints", add_note="Last reviewed 2026-01-15")
+        assert "error" not in result
+        assert result["layer"] == "curated"
+        assert result["action"] == "added"
+        # annotations.json should be created
+        ann_path = repo / ".ai-context" / "annotations.json"
+        assert ann_path.exists()
+        data = json.loads(ann_path.read_text(encoding="utf-8"))
+        assert any(
+            "Last reviewed 2026-01-15" in a["note"]
+            for entries in data.values()
+            for a in entries
+        )

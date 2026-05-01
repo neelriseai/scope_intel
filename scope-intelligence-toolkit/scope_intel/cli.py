@@ -302,6 +302,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_unpin.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
     p_unpin.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc annotate — add/view human notes on a generated file's index entry
+    p_ann = doc_sub.add_parser(
+        "annotate",
+        help=(
+            "Add or view human annotations on a .ai-context/ file. "
+            "Use annotations to leave 'last reviewed', 'needs update' notes "
+            "without touching the file content."
+        ),
+    )
+    p_ann.add_argument(
+        "file_id",
+        help="File id or partial name (e.g. 'roadmap', '003', 'constraints').",
+    )
+    p_ann.add_argument(
+        "--add", dest="add_note", metavar="NOTE",
+        help="Annotation text to record.",
+    )
+    p_ann.add_argument(
+        "--author", default="", metavar="NAME",
+        help="Author name or handle to attach to the annotation.",
+    )
+    p_ann.add_argument(
+        "--clear", action="store_true",
+        help="Remove all existing annotations from this file.",
+    )
+    p_ann.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_ann.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc check — health validation
     p_check = doc_sub.add_parser(
         "check",
@@ -1724,6 +1752,144 @@ def _doc_unpin(repo: Path, name: str) -> dict:
             "note": f"'{fid}' unpinned — ingest/rebuild can overwrite it again"}
 
 
+def _annotations_path(repo: Path) -> Path:
+    """Path to the shared annotations store for curated files."""
+    return repo / ".ai-context" / "annotations.json"
+
+
+def _load_annotations(repo: Path) -> dict:
+    """Return {rel_path: [annotation_dict, ...]} for all files."""
+    p = _annotations_path(repo)
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            pass
+    return {}
+
+
+def _save_annotations(repo: Path, data: dict) -> None:
+    p = _annotations_path(repo)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _doc_annotate(
+    repo: Path,
+    name: str,
+    *,
+    add_note: str | None = None,
+    author: str = "",
+    clear: bool = False,
+) -> dict:
+    """Add, view, or clear annotations for a .ai-context/ file.
+
+    Annotations for generated files are stored in index.json (per file entry).
+    Annotations for curated files are stored in .ai-context/annotations.json.
+
+    Returns:
+        {id, path, layer, annotations[], action}
+    """
+    import time as _time
+
+    match = _resolve_file_id(repo, name)
+    if match is None:
+        return {"error": f"no unique file matching '{name}' — use `scope doc list` to see ids"}
+    fid, rel = match
+
+    # Determine layer by checking which dir the path is in
+    layer = "curated" if "/curated/" in rel else "generated"
+
+    if layer == "generated":
+        # Annotations live inside index.json → file entry
+        index_path = repo / ".ai-context" / "generated" / "index.json"
+        if not index_path.exists():
+            return {"error": "index.json not found — run `scope doc ingest` first"}
+        try:
+            idx = json.loads(index_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"index.json unreadable: {exc}"}
+
+        # Find or create the file entry
+        for entry in idx.get("files", []):
+            if entry.get("path") == rel:
+                break
+        else:
+            return {"error": f"file '{fid}' not found in index.json"}
+
+        annotations: list[dict] = entry.setdefault("annotations", [])
+
+        if clear:
+            entry["annotations"] = []
+            index_path.write_text(json.dumps(idx, indent=2, ensure_ascii=False),
+                                   encoding="utf-8")
+            return {"id": fid, "path": rel, "layer": layer,
+                    "annotations": [], "action": "cleared"}
+
+        if add_note:
+            new_ann = {
+                "ts":     _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+                "note":   add_note,
+                "author": author,
+            }
+            annotations.append(new_ann)
+            index_path.write_text(json.dumps(idx, indent=2, ensure_ascii=False),
+                                   encoding="utf-8")
+            return {"id": fid, "path": rel, "layer": layer,
+                    "annotations": list(annotations), "action": "added"}
+
+        # View-only
+        return {"id": fid, "path": rel, "layer": layer,
+                "annotations": list(annotations), "action": "view"}
+
+    else:
+        # Curated: annotations.json
+        data = _load_annotations(repo)
+        ann_list: list[dict] = data.setdefault(rel, [])
+
+        if clear:
+            data[rel] = []
+            _save_annotations(repo, data)
+            return {"id": fid, "path": rel, "layer": layer,
+                    "annotations": [], "action": "cleared"}
+
+        if add_note:
+            new_ann = {
+                "ts":     _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+                "note":   add_note,
+                "author": author,
+            }
+            ann_list.append(new_ann)
+            _save_annotations(repo, data)
+            return {"id": fid, "path": rel, "layer": layer,
+                    "annotations": list(ann_list), "action": "added"}
+
+        return {"id": fid, "path": rel, "layer": layer,
+                "annotations": list(ann_list), "action": "view"}
+
+
+def _fmt_doc_annotate(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+
+    action_map = {"cleared": "cleared all annotations",
+                  "added":   "annotation added",
+                  "view":    "annotations"}
+    action_str = action_map.get(r["action"], r["action"])
+    print(f"[{r['layer']}] {r['path']}  — {action_str}")
+
+    annotations = r.get("annotations", [])
+    if not annotations:
+        print("  (no annotations)")
+        if r["action"] == "view":
+            print("  → add one with: scope doc annotate <file-id> --add \"your note\"")
+        return
+    for i, ann in enumerate(annotations, 1):
+        author_str = f"  — {ann['author']}" if ann.get("author") else ""
+        print(f"  [{i}] {ann.get('ts','?')}{author_str}")
+        print(f"       {ann['note']}")
+
+
 def _doc_fetch_for(
     repo: Path,
     feature: str,
@@ -2497,6 +2663,18 @@ def cmd_doc(args) -> int:
                              layer=args.layer, context_lines=args.context,
                              use_regex=getattr(args, "regex", False))
         _emit(result, args.json, formatter=_fmt_doc_search)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "annotate":
+        repo = _resolve_repo(args.repo)
+        result = _doc_annotate(
+            repo,
+            args.file_id,
+            add_note=getattr(args, "add_note", None),
+            author=getattr(args, "author", ""),
+            clear=getattr(args, "clear", False),
+        )
+        _emit(result, args.json, formatter=_fmt_doc_annotate)
         return 0 if "error" not in result else 2
 
     if args.doc_cmd == "diff":

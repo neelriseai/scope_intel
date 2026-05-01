@@ -504,6 +504,41 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_annotate",
+        "description": (
+            "Add, view, or clear human annotations on a .ai-context/ file. "
+            "Annotations are timestamped notes ('last reviewed', 'needs update for v2', etc.) "
+            "stored alongside the file entry in index.json (generated) or annotations.json (curated). "
+            "Call with just file_id to view existing annotations. "
+            "Use add_note to record a new annotation. Use clear=true to remove all."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "file_id": {
+                    "type": "string",
+                    "description": "File id or partial name (e.g. 'roadmap', '003', 'constraints').",
+                },
+                "add_note": {
+                    "type": "string",
+                    "description": "Annotation text to record (omit to view existing).",
+                },
+                "author": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Author name or handle.",
+                },
+                "clear": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Remove all existing annotations from this file.",
+                },
+            },
+            "required": ["file_id"],
+        },
+    },
+    {
         "name": "doc_pin",
         "description": (
             "Pin a generated .ai-context/ file so it is never overwritten by "
@@ -941,6 +976,16 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_templates_created": total_tmpl,
             "results":                 results,
         }
+
+    if name == "doc_annotate":
+        from .cli import _doc_annotate
+        return _doc_annotate(
+            repo,
+            arguments["file_id"],
+            add_note=arguments.get("add_note"),
+            author=arguments.get("author", ""),
+            clear=arguments.get("clear", False),
+        )
 
     if name == "doc_pin":
         from .cli import _doc_pin
