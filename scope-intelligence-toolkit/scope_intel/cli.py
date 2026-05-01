@@ -253,6 +253,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show what would be removed without deleting anything.",
     )
 
+    # doc fetch-for — unified context for a feature (doc + memories + scope)
+    p_fetchfor = doc_sub.add_parser(
+        "fetch-for",
+        help=(
+            "Retrieve all design doc context, memories, and scope info relevant to a feature. "
+            "One-shot context bundle for Claude."
+        ),
+    )
+    p_fetchfor.add_argument(
+        "feature",
+        help="Feature id or alias (e.g. 'memory-layer', 'rag', 'validation-engine').",
+    )
+    p_fetchfor.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_fetchfor.add_argument(
+        "--no-memories", action="store_true",
+        help="Skip memory fetch (faster if MemPalace is large).",
+    )
+    p_fetchfor.add_argument(
+        "--no-scope", action="store_true",
+        help="Skip scope index lookup (feature file list, symbols).",
+    )
+    p_fetchfor.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc check — health validation
     p_check = doc_sub.add_parser(
         "check",
@@ -1450,6 +1473,170 @@ def _fmt_doc_check(r: dict) -> None:
             print("  → warnings: edit curated files to replace TODO placeholders")
 
 
+def _doc_fetch_for(
+    repo: Path,
+    feature: str,
+    *,
+    include_memories: bool = True,
+    include_scope: bool = True,
+) -> dict:
+    """Return a unified context bundle for a feature: doc excerpts + memories + scope.
+
+    Layers returned:
+      doc_files  — .ai-context/ files whose name matches the feature slug
+      doc_search — lines from .ai-context/ files that mention the feature
+      memories   — relevant MemPalace entries (if include_memories)
+      scope      — feature scope info from index (if include_scope + indexed)
+    """
+    import re as _re
+
+    # Normalise feature name to a slug for file matching
+    slug = _re.sub(r"[^a-z0-9]+", "-", feature.lower()).strip("-")
+
+    result: dict = {
+        "feature":    feature,
+        "slug":       slug,
+        "doc_files":  [],
+        "doc_search": [],
+        "memories":   [],
+        "scope":      None,
+    }
+
+    # --- 1. Find .ai-context/ files that match the feature slug ---
+    ai_ctx = repo / ".ai-context"
+    if ai_ctx.exists():
+        for directory, layer in [
+            (ai_ctx / "generated", "generated"),
+            (ai_ctx / "curated",   "curated"),
+        ]:
+            if not directory.exists():
+                continue
+            for p in sorted(directory.glob("*.md")):
+                # Match if slug appears anywhere in the filename
+                if slug in p.stem or slug.replace("-", "") in p.stem.replace("-", ""):
+                    try:
+                        content = p.read_text(encoding="utf-8")
+                    except OSError:
+                        continue
+                    rel = str(p.relative_to(repo)).replace("\\", "/")
+                    result["doc_files"].append({
+                        "id":      p.stem,
+                        "path":    rel,
+                        "layer":   layer,
+                        "content": content,
+                        "chars":   len(content),
+                    })
+
+        # --- 2. Search .ai-context/ for mentions of the feature name ---
+        search_r = _doc_search(repo, feature, layer="all", context_lines=2)
+        if "error" not in search_r:
+            # Exclude files already returned in doc_files to avoid duplication
+            existing_paths = {f["path"] for f in result["doc_files"]}
+            result["doc_search"] = [
+                r for r in search_r.get("results", [])
+                if r["path"] not in existing_paths
+            ]
+
+    # --- 3. Fetch relevant memories ---
+    if include_memories:
+        try:
+            from .core.mempalace import fetch_relevant
+            mem_r = fetch_relevant(repo, feature=slug, limit=15)
+            if "error" not in mem_r:
+                # Flatten all memory layers into a single list
+                layers = mem_r.get("layers", {})
+                mems: list[dict] = []
+                for layer_key in ("semantic", "procedural", "episodic"):
+                    mems.extend(layers.get(layer_key, []))
+                result["memories"] = mems
+        except Exception:  # noqa: BLE001
+            pass
+
+    # --- 4. Scope index lookup ---
+    if include_scope:
+        try:
+            from .core.query_engine import get_feature_scope
+            from .core import store
+            if store.is_initialized(repo):
+                scope_r = get_feature_scope(repo, feature)
+                if "error" not in scope_r:
+                    result["scope"] = {
+                        "files":       scope_r.get("files", [])[:20],
+                        "tests":       [t["file"] for t in scope_r.get("tests", [])[:5]],
+                        "feature":     scope_r.get("feature", {}),
+                    }
+        except Exception:  # noqa: BLE001
+            pass
+
+    result["total_doc_files"]    = len(result["doc_files"])
+    result["total_doc_excerpts"] = len(result["doc_search"])
+    result["total_memories"]     = len(result["memories"])
+    return result
+
+
+def _fmt_doc_fetch_for(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+
+    print(f"# Context bundle: {r['feature']}")
+    print(f"  doc files matched:   {r['total_doc_files']}")
+    print(f"  doc sections found:  {r['total_doc_excerpts']}")
+    print(f"  memories:            {r['total_memories']}")
+    if r["scope"]:
+        s = r["scope"]
+        feat = s.get("feature", {})
+        print(f"  scope:  {feat.get('file_count',0)} files  "
+              f"{feat.get('symbol_count',0)} symbols")
+
+    # --- Full doc files (highest priority — exact filename match) ---
+    for df in r.get("doc_files", []):
+        print(f"\n{'═'*60}")
+        print(f"  [{df['layer']}] {df['path']}  ({df['chars']:,} chars)")
+        print(f"{'═'*60}")
+        # Print first 60 lines to avoid flooding the terminal
+        lines = df["content"].splitlines()
+        for line in lines[:60]:
+            print(line)
+        if len(lines) > 60:
+            print(f"\n  … ({len(lines)-60} more lines — use `scope doc fetch {df['id']}`)")
+
+    # --- Doc search excerpts ---
+    for res in r.get("doc_search", [])[:5]:
+        print(f"\n{'─'*60}")
+        print(f"  [{res['layer']}] {res['path']}  ({res['match_count']} mention(s))")
+        print(f"{'─'*60}")
+        for m in res["matches"][:3]:
+            for ctx in m["context_before"]:
+                print(f"  {ctx}")
+            print(f"→ {m['line']}")
+            for ctx in m["context_after"]:
+                print(f"  {ctx}")
+
+    # --- Memories ---
+    if r.get("memories"):
+        print(f"\n{'─'*60}")
+        print(f"  MEMORIES ({r['total_memories']})")
+        print(f"{'─'*60}")
+        for mem in r["memories"][:10]:
+            kind = mem.get("type", "note")
+            conf = f"  conf={mem.get('confidence',1.0):.0%}" if kind == "semantic" else ""
+            print(f"  [{kind}]{conf}  {mem.get('note','')[:100]}")
+
+    # --- Scope index ---
+    if r["scope"]:
+        print(f"\n{'─'*60}")
+        print(f"  SCOPE FILES")
+        print(f"{'─'*60}")
+        for f in r["scope"]["files"][:10]:
+            print(f"  {f}")
+        if r["scope"]["tests"]:
+            print(f"  tests: {', '.join(r['scope']['tests'])}")
+
+    if not any([r["doc_files"], r["doc_search"], r["memories"], r["scope"]]):
+        print(f"\n  (no context found for '{r['feature']}' — "
+              f"run `scope doc ingest` first or try a different feature name)")
+
+
 def _fmt_batch_ingest(r: dict) -> None:
     if "error" in r:
         print(r["error"]); return
@@ -2059,6 +2246,17 @@ def cmd_doc(args) -> int:
                              layer=args.layer, context_lines=args.context,
                              use_regex=getattr(args, "regex", False))
         _emit(result, args.json, formatter=_fmt_doc_search)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "fetch-for":
+        repo = _resolve_repo(args.repo)
+        result = _doc_fetch_for(
+            repo,
+            args.feature,
+            include_memories=not args.no_memories,
+            include_scope=not args.no_scope,
+        )
+        _emit(result, args.json, formatter=_fmt_doc_fetch_for)
         return 0 if "error" not in result else 2
 
     if args.doc_cmd == "clear":

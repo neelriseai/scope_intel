@@ -503,6 +503,39 @@ TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "name": "doc_fetch_for_feature",
+        "description": (
+            "Return a unified context bundle for a specific feature: "
+            "matching .ai-context/ files, design-doc excerpts mentioning the feature, "
+            "relevant MemPalace memories, and scope-index file list. "
+            "One-shot call to prime Claude with everything it needs to work on a feature."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "feature": {
+                    "type": "string",
+                    "description": (
+                        "Feature name or slug (e.g. 'memory-layer', 'rag', 'auth'). "
+                        "Will be normalised to a slug for filename matching."
+                    ),
+                },
+                "include_memories": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include relevant MemPalace entries (default: true).",
+                },
+                "include_scope": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include scope-index feature files/tests (default: true).",
+                },
+            },
+            "required": ["feature"],
+        },
+    },
     # --- Phase 5 tools ---
     {
         "name": "mem_auto_capture",
@@ -860,6 +893,15 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_templates_created": total_tmpl,
             "results":                 results,
         }
+
+    if name == "doc_fetch_for_feature":
+        from .cli import _doc_fetch_for
+        return _doc_fetch_for(
+            repo,
+            arguments["feature"],
+            include_memories=arguments.get("include_memories", True),
+            include_scope=arguments.get("include_scope", True),
+        )
 
     if name == "doc_stats":
         ai_ctx = repo / ".ai-context"

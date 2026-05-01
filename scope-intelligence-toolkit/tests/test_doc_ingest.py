@@ -23,7 +23,7 @@ from scope_intel.adapters.doc_reader import (
     _docx_table_to_markdown,
 )
 from scope_intel.core.llm_client import NullLLMClient, get_client
-from scope_intel.cli import _doc_list, _doc_fetch, _doc_search
+from scope_intel.cli import _doc_list, _doc_fetch, _doc_search, _doc_fetch_for
 from scope_intel.core.doc_ingestor import (
     _route_section,
     _split_sections,
@@ -1338,3 +1338,110 @@ class TestDocClear:
         result = ingest_document(repo, md_file, overwrite=True)
         assert "error" not in result
         assert result["files_written"] > 0
+
+
+# ---------------------------------------------------------------------------
+# TestDocFetchFor
+# ---------------------------------------------------------------------------
+
+class TestDocFetchFor:
+    """Tests for _doc_fetch_for — unified context bundle for a feature."""
+
+    # -- helpers --
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    # -- tests --
+
+    def test_returns_expected_keys(self, repo, md_file):
+        self._ingest(repo, md_file)
+        result = _doc_fetch_for(repo, "memory")
+        for key in ("feature", "slug", "doc_files", "doc_search",
+                    "memories", "scope", "total_doc_files",
+                    "total_doc_excerpts", "total_memories"):
+            assert key in result, f"missing key: {key}"
+
+    def test_no_ai_context_returns_empty_not_error(self, tmp_path):
+        """If .ai-context/ doesn't exist we get an empty result, not an error."""
+        result = _doc_fetch_for(tmp_path, "anything")
+        assert "error" not in result
+        assert result["total_doc_files"] == 0
+        assert result["total_doc_excerpts"] == 0
+
+    def test_slug_normalisation(self, repo):
+        result = _doc_fetch_for(repo, "Memory Layer  (v2)")
+        assert result["slug"] == "memory-layer-v2"
+
+    def test_doc_search_finds_mentions(self, repo, md_file):
+        self._ingest(repo, md_file)
+        # SAMPLE_MD has a "Roadmap" section — search should surface a doc_search hit
+        result = _doc_fetch_for(repo, "roadmap")
+        total = result["total_doc_files"] + result["total_doc_excerpts"]
+        assert total > 0, "expected at least one doc_files or doc_search hit for 'roadmap'"
+
+    def test_doc_files_matched_by_filename(self, repo, tmp_path):
+        """A .ai-context/ file whose stem contains the slug should appear in doc_files."""
+        # Create a synthetic .ai-context/generated/ file whose name contains the slug
+        ai_gen = repo / ".ai-context" / "generated"
+        ai_gen.mkdir(parents=True, exist_ok=True)
+        target = ai_gen / "001-memory-layer.md"
+        target.write_text("# Memory Layer\nSome content about memory.\n", encoding="utf-8")
+        # Also write a minimal index.json so _doc_list doesn't fail
+        (ai_gen / "index.json").write_text(
+            json.dumps({
+                "source": "test.md", "generated_at": "2026-01-01",
+                "mode": "python", "source_hash": "",
+                "files": [{"id": "001-memory-layer",
+                            "path": ".ai-context/generated/001-memory-layer.md",
+                            "layer": "generated", "title": "Memory Layer"}],
+            }), encoding="utf-8",
+        )
+        result = _doc_fetch_for(repo, "memory-layer")
+        assert result["total_doc_files"] >= 1
+        ids = [f["id"] for f in result["doc_files"]]
+        assert "001-memory-layer" in ids
+
+    def test_no_memories_flag_skips_memories(self, repo, md_file):
+        self._ingest(repo, md_file)
+        result = _doc_fetch_for(repo, "validation", include_memories=False)
+        assert result["memories"] == []
+        assert result["total_memories"] == 0
+
+    def test_no_scope_flag_skips_scope(self, repo, md_file):
+        self._ingest(repo, md_file)
+        result = _doc_fetch_for(repo, "memory", include_scope=False)
+        assert result["scope"] is None
+
+    def test_feature_with_no_match_returns_empty_bundle(self, repo, md_file):
+        self._ingest(repo, md_file)
+        # "xyzzy-nonexistent" should match nothing
+        result = _doc_fetch_for(repo, "xyzzy-nonexistent")
+        assert result["total_doc_files"] == 0
+        # doc_search may return 0 as well — just assert it doesn't error
+        assert "error" not in result
+
+    def test_doc_search_deduplicates_with_doc_files(self, repo, tmp_path):
+        """Files already in doc_files should not also appear in doc_search."""
+        ai_gen = repo / ".ai-context" / "generated"
+        ai_gen.mkdir(parents=True, exist_ok=True)
+        # Create a file that both matches the slug and mentions the feature name
+        target = ai_gen / "001-memory-layer.md"
+        target.write_text("# Memory Layer\nmemory-layer is important.\n", encoding="utf-8")
+        (ai_gen / "index.json").write_text(
+            json.dumps({
+                "source": "test.md", "generated_at": "2026-01-01",
+                "mode": "python", "source_hash": "",
+                "files": [{"id": "001-memory-layer",
+                            "path": ".ai-context/generated/001-memory-layer.md",
+                            "layer": "generated", "title": "Memory Layer"}],
+            }), encoding="utf-8",
+        )
+        result = _doc_fetch_for(repo, "memory-layer")
+        # The file should be in doc_files (slug match)
+        assert result["total_doc_files"] >= 1
+        # It should NOT also appear in doc_search
+        doc_search_paths = {r["path"] for r in result["doc_search"]}
+        doc_files_paths  = {f["path"] for f in result["doc_files"]}
+        overlap = doc_search_paths & doc_files_paths
+        assert overlap == set(), f"duplicate paths in both doc_files and doc_search: {overlap}"
