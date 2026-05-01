@@ -356,6 +356,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_export.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc diff — show files manually edited since last ingest
+    p_ddiff = doc_sub.add_parser(
+        "diff",
+        help=(
+            "Show which .ai-context/ files have been manually edited since the last "
+            "ingest run (content hash mismatch against index.json baseline)."
+        ),
+    )
+    p_ddiff.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_ddiff.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc stats — token/char counts per .ai-context/ file
     p_stats = doc_sub.add_parser(
         "stats",
@@ -1473,6 +1484,120 @@ def _fmt_doc_check(r: dict) -> None:
             print("  → warnings: edit curated files to replace TODO placeholders")
 
 
+def _doc_diff(repo: Path) -> dict:
+    """Compare current .ai-context/ file contents against the hashes stored in index.json.
+
+    Detects files that have been manually edited since the last `scope doc ingest` run.
+
+    Returns:
+        {unchanged[], modified[], missing[], extra[], total_checked, has_changes}
+    """
+    import hashlib as _hashlib
+
+    index_path = repo / ".ai-context" / "generated" / "index.json"
+    if not index_path.exists():
+        return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
+
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"index.json unreadable: {exc}"}
+
+    files = index.get("files", [])
+    source = index.get("source", "?")
+    generated_at = index.get("generated_at", "?")
+
+    unchanged: list[dict] = []
+    modified:  list[dict] = []
+    missing:   list[dict] = []
+
+    for entry in files:
+        rel  = entry.get("path", "")
+        fid  = entry.get("id", rel)
+        stored_hash = entry.get("written_hash", "")
+        fpath = repo / rel
+        base = {"id": fid, "path": rel, "layer": entry.get("layer", "?")}
+
+        if not fpath.exists():
+            missing.append({**base, "stored_hash": stored_hash})
+            continue
+
+        try:
+            content = fpath.read_text(encoding="utf-8")
+            current_hash = _hashlib.sha256(content.encode()).hexdigest()[:8]
+        except OSError as exc:
+            missing.append({**base, "note": str(exc)})
+            continue
+
+        if not stored_hash:
+            # Older index.json without written_hash — can't diff this file
+            unchanged.append({**base, "note": "no baseline hash (re-ingest to enable diff)"})
+        elif current_hash == stored_hash:
+            unchanged.append({**base, "current_hash": current_hash})
+        else:
+            modified.append({
+                **base,
+                "stored_hash":  stored_hash,
+                "current_hash": current_hash,
+            })
+
+    # Also check for extra files on disk not in index.json
+    indexed_paths = {e.get("path", "") for e in files}
+    extra: list[dict] = []
+    ai_gen = repo / ".ai-context" / "generated"
+    if ai_gen.exists():
+        for p in sorted(ai_gen.glob("*.md")):
+            rel = str(p.relative_to(repo)).replace("\\", "/")
+            if rel not in indexed_paths:
+                extra.append({"id": p.stem, "path": rel, "layer": "generated"})
+
+    has_changes = bool(modified or missing or extra)
+    return {
+        "source":        source,
+        "generated_at":  generated_at,
+        "total_checked": len(files),
+        "unchanged":     unchanged,
+        "modified":      modified,
+        "missing":       missing,
+        "extra":         extra,
+        "has_changes":   has_changes,
+    }
+
+
+def _fmt_doc_diff(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+
+    status = "✓ no changes" if not r["has_changes"] else \
+             f"⚠ {len(r['modified'])} modified  {len(r['missing'])} missing  {len(r['extra'])} extra"
+    print(f"scope doc diff — {status}")
+    print(f"  baseline: {r['source']}  (ingested: {r['generated_at']})")
+    print(f"  checked:  {r['total_checked']} indexed file(s)")
+
+    if r.get("modified"):
+        print(f"\nmodified since last ingest ({len(r['modified'])}):")
+        for f in r["modified"]:
+            print(f"  ✎ [{f['layer']}] {f['path']}")
+            print(f"      stored={f['stored_hash']}  current={f['current_hash']}")
+        print("  → these files were edited after ingest — run `scope doc rebuild` to reset")
+
+    if r.get("missing"):
+        print(f"\nmissing from disk ({len(r['missing'])}):")
+        for f in r["missing"]:
+            note = f"  ({f.get('note','')})" if f.get("note") else ""
+            print(f"  ✗ [{f['layer']}] {f['path']}{note}")
+        print("  → re-run `scope doc ingest --overwrite` to regenerate")
+
+    if r.get("extra"):
+        print(f"\nextra files not in index.json ({len(r['extra'])}):")
+        for f in r["extra"]:
+            print(f"  + [{f['layer']}] {f['path']}")
+        print("  → these files were added manually (safe to keep or remove)")
+
+    if not r["has_changes"]:
+        print(f"\n  All {r['total_checked']} file(s) match their ingest-time hashes.")
+
+
 def _doc_fetch_for(
     repo: Path,
     feature: str,
@@ -2247,6 +2372,13 @@ def cmd_doc(args) -> int:
                              use_regex=getattr(args, "regex", False))
         _emit(result, args.json, formatter=_fmt_doc_search)
         return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "diff":
+        repo = _resolve_repo(args.repo)
+        result = _doc_diff(repo)
+        _emit(result, args.json, formatter=_fmt_doc_diff)
+        return 0 if "error" not in result and not result.get("has_changes") else \
+               1 if "error" not in result else 2
 
     if args.doc_cmd == "fetch-for":
         repo = _resolve_repo(args.repo)

@@ -504,6 +504,19 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_diff",
+        "description": (
+            "Compare current .ai-context/ file contents against the hashes recorded "
+            "at ingest time. Returns lists of: unchanged (hash matches), modified "
+            "(manually edited since ingest), missing (deleted), and extra (not in index). "
+            "Useful before a rebuild to see what manual edits exist."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": _REPO_PROP,
+        },
+    },
+    {
         "name": "doc_fetch_for_feature",
         "description": (
             "Return a unified context bundle for a specific feature: "
@@ -893,6 +906,10 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_templates_created": total_tmpl,
             "results":                 results,
         }
+
+    if name == "doc_diff":
+        from .cli import _doc_diff
+        return _doc_diff(repo)
 
     if name == "doc_fetch_for_feature":
         from .cli import _doc_fetch_for

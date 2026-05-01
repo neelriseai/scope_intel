@@ -23,7 +23,7 @@ from scope_intel.adapters.doc_reader import (
     _docx_table_to_markdown,
 )
 from scope_intel.core.llm_client import NullLLMClient, get_client
-from scope_intel.cli import _doc_list, _doc_fetch, _doc_search, _doc_fetch_for
+from scope_intel.cli import _doc_list, _doc_fetch, _doc_search, _doc_fetch_for, _doc_diff
 from scope_intel.core.doc_ingestor import (
     _route_section,
     _split_sections,
@@ -1445,3 +1445,100 @@ class TestDocFetchFor:
         doc_files_paths  = {f["path"] for f in result["doc_files"]}
         overlap = doc_search_paths & doc_files_paths
         assert overlap == set(), f"duplicate paths in both doc_files and doc_search: {overlap}"
+
+
+# ---------------------------------------------------------------------------
+# TestDocDiff
+# ---------------------------------------------------------------------------
+
+class TestDocDiff:
+    """Tests for _doc_diff — content-hash-based diff of .ai-context/ files."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def test_no_ai_context_returns_error(self, repo):
+        result = _doc_diff(repo)
+        assert "error" in result
+
+    def test_fresh_ingest_all_unchanged(self, repo, md_file):
+        self._ingest(repo, md_file)
+        result = _doc_diff(repo)
+        assert "error" not in result
+        assert result["has_changes"] is False
+        assert len(result["modified"]) == 0
+        assert len(result["missing"]) == 0
+
+    def test_total_checked_matches_indexed_files(self, repo, md_file):
+        self._ingest(repo, md_file)
+        result = _doc_diff(repo)
+        # total_checked should equal the number of entries in index.json
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json")
+            .read_text(encoding="utf-8")
+        )
+        assert result["total_checked"] == len(idx["files"])
+
+    def test_modified_file_detected(self, repo, md_file):
+        self._ingest(repo, md_file)
+        # Manually edit one generated file
+        gen_dir = repo / ".ai-context" / "generated"
+        md_files = list(gen_dir.glob("*.md"))
+        assert md_files, "expected at least one generated .md file"
+        target = md_files[0]
+        original = target.read_text(encoding="utf-8")
+        target.write_text(original + "\n<!-- manually edited -->\n", encoding="utf-8")
+
+        result = _doc_diff(repo)
+        assert result["has_changes"] is True
+        modified_paths = [f["path"] for f in result["modified"]]
+        rel = str(target.relative_to(repo)).replace("\\", "/")
+        assert rel in modified_paths, f"expected {rel} in modified, got {modified_paths}"
+
+    def test_missing_file_detected(self, repo, md_file):
+        self._ingest(repo, md_file)
+        gen_dir = repo / ".ai-context" / "generated"
+        md_files = list(gen_dir.glob("*.md"))
+        assert md_files
+        target = md_files[0]
+        rel = str(target.relative_to(repo)).replace("\\", "/")
+        target.unlink()
+
+        result = _doc_diff(repo)
+        assert result["has_changes"] is True
+        missing_paths = [f["path"] for f in result["missing"]]
+        assert rel in missing_paths
+
+    def test_extra_file_detected(self, repo, md_file):
+        self._ingest(repo, md_file)
+        gen_dir = repo / ".ai-context" / "generated"
+        # Create an extra file not in index.json
+        extra = gen_dir / "999-manual-notes.md"
+        extra.write_text("# Manual Notes\n\nsome content\n", encoding="utf-8")
+
+        result = _doc_diff(repo)
+        assert result["has_changes"] is True
+        extra_paths = [f["path"] for f in result["extra"]]
+        rel = str(extra.relative_to(repo)).replace("\\", "/")
+        assert rel in extra_paths
+
+    def test_written_hash_stored_in_index(self, repo, md_file):
+        """After ingest, each index.json file entry should have a written_hash."""
+        self._ingest(repo, md_file)
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json")
+            .read_text(encoding="utf-8")
+        )
+        for entry in idx["files"]:
+            assert "written_hash" in entry, f"missing written_hash in {entry.get('id')}"
+            # Hash is a non-empty 8-char hex string
+            wh = entry["written_hash"]
+            assert len(wh) == 8, f"unexpected hash length: {wh!r}"
+            assert all(c in "0123456789abcdef" for c in wh), f"not hex: {wh!r}"
+
+    def test_result_keys_present(self, repo, md_file):
+        self._ingest(repo, md_file)
+        result = _doc_diff(repo)
+        for key in ("source", "generated_at", "total_checked",
+                    "unchanged", "modified", "missing", "extra", "has_changes"):
+            assert key in result, f"missing key: {key}"

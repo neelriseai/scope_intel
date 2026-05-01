@@ -656,8 +656,14 @@ def _write_bucket_file(
     rel = str(out_path.relative_to(rel_root)).replace("\\", "/")
 
     if out_path.exists() and not overwrite:
+        try:
+            existing = out_path.read_text(encoding="utf-8")
+            w_hash = hashlib.sha256(existing.encode()).hexdigest()[:8]
+        except OSError:
+            w_hash = ""
         return {"path": rel, "title": primary_title,
-                "sections": len(sections), "layer": "?", "status": "skipped_existing"}
+                "sections": len(sections), "layer": "?", "status": "skipped_existing",
+                "written_hash": w_hash}
 
     lines: list[str] = [f"# {primary_title}\n"]
     for s in sections:
@@ -673,12 +679,14 @@ def _write_bucket_file(
         f"from `{doc_name}` on {time.strftime('%Y-%m-%d')}.\n"
     )
     content = "\n".join(lines)
+    w_hash = hashlib.sha256(content.encode()).hexdigest()[:8]
 
     if not dry_run:
         out_path.write_text(content, encoding="utf-8")
 
     return {"path": rel, "title": primary_title,
-            "sections": len(sections), "layer": "?", "status": "written"}
+            "sections": len(sections), "layer": "?", "status": "written",
+            "written_hash": w_hash}
 
 
 def _ingest_with_llm(
@@ -920,10 +928,11 @@ def _ingest_with_llm(
         "total_files":  len(generated_files),
         "files": [
             {
-                "id":    f["path"].split("/")[-1].replace(".md", ""),
-                "path":  f["path"],
-                "title": f["title"],
-                "layer": f["layer"],
+                "id":           f["path"].split("/")[-1].replace(".md", ""),
+                "path":         f["path"],
+                "title":        f["title"],
+                "layer":        f["layer"],
+                "written_hash": f.get("written_hash", ""),
             }
             for f in generated_files
         ],
@@ -1237,6 +1246,12 @@ def _ingest_python_only(
 
         if out_path.exists() and not overwrite:
             skipped_files.append(rel)
+            # Read existing content to record its hash in index.json
+            try:
+                existing_content = out_path.read_text(encoding="utf-8")
+                written_hash = hashlib.sha256(existing_content.encode()).hexdigest()[:8]
+            except OSError:
+                written_hash = ""
             # Still include in manifest so index.json is complete
             generated_files.append({
                 "path": rel,
@@ -1244,6 +1259,7 @@ def _ingest_python_only(
                 "sections": len(bucket["sections"]),
                 "layer": dest_type,
                 "status": "skipped_existing",
+                "written_hash": written_hash,
             })
             continue
 
@@ -1262,6 +1278,7 @@ def _ingest_python_only(
             f"{time.strftime('%Y-%m-%d')}.\n"
         )
         content = "\n".join(lines)
+        written_hash = hashlib.sha256(content.encode()).hexdigest()[:8]
 
         if not dry_run:
             out_path.write_text(content, encoding="utf-8")
@@ -1272,6 +1289,7 @@ def _ingest_python_only(
             "sections": len(bucket["sections"]),
             "layer": dest_type,
             "status": "written",
+            "written_hash": written_hash,
         })
 
     # --- index.json ---
@@ -1285,10 +1303,11 @@ def _ingest_python_only(
         "total_files":  len(generated_files),
         "files": [
             {
-                "id":    f["path"].split("/")[-1].replace(".md", ""),
-                "path":  f["path"],
-                "title": f["title"],
-                "layer": f["layer"],
+                "id":           f["path"].split("/")[-1].replace(".md", ""),
+                "path":         f["path"],
+                "title":        f["title"],
+                "layer":        f["layer"],
+                "written_hash": f.get("written_hash", ""),
             }
             for f in generated_files
         ],
