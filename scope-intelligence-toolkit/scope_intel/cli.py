@@ -458,6 +458,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_rename.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
     p_rename.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc copy — duplicate a curated file under a new name
+    p_copy = doc_sub.add_parser(
+        "copy",
+        help="Duplicate a curated .ai-context/ file under a new name (annotations not copied).",
+    )
+    p_copy.add_argument("source", help="Source name or partial id of the curated file to copy.")
+    p_copy.add_argument("new", help="New file name (without extension).")
+    p_copy.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_copy.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc snapshot — named point-in-time checkpoints of .ai-context/ file hashes
     p_snap = doc_sub.add_parser(
         "snapshot",
@@ -3371,6 +3381,41 @@ def _doc_rename(repo: Path, old_name: str, new_name: str) -> dict:
     }
 
 
+def _doc_copy(repo: Path, source_name: str, new_name: str) -> dict:
+    """Duplicate a curated .ai-context/ file under a new name (annotations not copied).
+
+    Returns:
+        {ok, source_path, new_path}
+    or {'error': ...}
+    """
+    cur_dir = repo / ".ai-context" / "curated"
+    if not cur_dir.exists():
+        return {"error": "no .ai-context/curated/ directory — nothing to copy"}
+
+    src_stem = source_name.removesuffix(".md") if source_name.endswith(".md") else source_name
+
+    src_path: Path | None = None
+    for p in sorted(cur_dir.glob("*.md")):
+        if src_stem.lower() in p.stem.lower():
+            src_path = p
+            break
+    if src_path is None:
+        return {"error": f"no curated file matching '{source_name}' in .ai-context/curated/"}
+
+    new_stem = new_name.removesuffix(".md") if new_name.endswith(".md") else new_name
+    new_path = cur_dir / f"{new_stem}.md"
+    if new_path.exists():
+        return {"error": f"target file already exists: {new_path.name}"}
+
+    new_path.write_text(src_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    return {
+        "ok":          True,
+        "source_path": str(src_path.relative_to(repo)).replace("\\", "/"),
+        "new_path":    str(new_path.relative_to(repo)).replace("\\", "/"),
+    }
+
+
 def cmd_doc(args) -> int:
     if args.doc_cmd == "ingest":
         repo = _resolve_repo(args.repo)
@@ -3809,6 +3854,17 @@ def cmd_doc(args) -> int:
             print(f"renamed: {result['old_path']}  →  {result['new_path']}")
             if result["annotations_updated"]:
                 print(f"  {result['annotations_updated']} annotation(s) re-linked")
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "copy":
+        repo = _resolve_repo(args.repo)
+        result = _doc_copy(repo, args.source, args.new)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        else:
+            print(f"copied: {result['source_path']}  →  {result['new_path']}")
         return 0 if "error" not in result else 2
 
     print(f"unknown doc subcommand: {args.doc_cmd}", file=sys.stderr)

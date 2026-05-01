@@ -2345,3 +2345,71 @@ class TestDocRename:
         result = _doc_rename(repo, "auth", "auth-spec")
         assert "error" not in result, result
         assert (repo / ".ai-context" / "curated" / "auth-spec.md").exists()
+
+
+class TestDocCopy:
+    """Tests for _doc_copy — duplicate a curated .ai-context/ file."""
+
+    def _make_curated(self, repo, stem: str, content: str = "# Title\n\nBody.") -> Path:
+        cur_dir = repo / ".ai-context" / "curated"
+        cur_dir.mkdir(parents=True, exist_ok=True)
+        p = cur_dir / f"{stem}.md"
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_copy_creates_duplicate(self, repo):
+        from scope_intel.cli import _doc_copy
+        self._make_curated(repo, "constraints", "# Constraints\n\nOriginal text.")
+        result = _doc_copy(repo, "constraints", "constraints-v2")
+        assert "error" not in result, result
+        assert result["ok"] is True
+        # Both files exist
+        assert (repo / ".ai-context" / "curated" / "constraints.md").exists()
+        new_path = repo / ".ai-context" / "curated" / "constraints-v2.md"
+        assert new_path.exists()
+        # Content matches the source
+        assert new_path.read_text(encoding="utf-8") == "# Constraints\n\nOriginal text."
+
+    def test_copy_result_keys(self, repo):
+        from scope_intel.cli import _doc_copy
+        self._make_curated(repo, "design")
+        result = _doc_copy(repo, "design", "design-draft")
+        for key in ("ok", "source_path", "new_path"):
+            assert key in result, f"missing key: {key}"
+
+    def test_copy_unknown_source_returns_error(self, repo):
+        from scope_intel.cli import _doc_copy
+        self._make_curated(repo, "alpha")
+        result = _doc_copy(repo, "no-such-file", "anything")
+        assert "error" in result
+
+    def test_copy_target_already_exists_returns_error(self, repo):
+        from scope_intel.cli import _doc_copy
+        self._make_curated(repo, "alpha")
+        self._make_curated(repo, "beta")
+        result = _doc_copy(repo, "alpha", "beta")
+        assert "error" in result
+
+    def test_copy_does_not_carry_annotations(self, repo):
+        """Annotations are tied to the source path and intentionally not duplicated."""
+        from scope_intel.cli import _doc_copy
+        import json as _json
+        self._make_curated(repo, "spec")
+        ann_path = repo / ".ai-context" / "annotations.json"
+        src_rel = ".ai-context/curated/spec.md"
+        ann_path.write_text(
+            _json.dumps({src_rel: [{"ts": "2025-01-01T00:00:00Z", "note": "old note"}]}),
+            encoding="utf-8",
+        )
+        result = _doc_copy(repo, "spec", "spec-fork")
+        assert "error" not in result
+        ann_data = _json.loads(ann_path.read_text(encoding="utf-8"))
+        new_rel = ".ai-context/curated/spec-fork.md"
+        # New copy starts clean — annotations only on the original path.
+        assert src_rel in ann_data
+        assert new_rel not in ann_data
+
+    def test_copy_no_curated_dir_returns_error(self, repo):
+        from scope_intel.cli import _doc_copy
+        result = _doc_copy(repo, "anything", "new")
+        assert "error" in result
