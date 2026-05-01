@@ -1070,10 +1070,15 @@ def ingest_document(
     repo_root = Path(repo_root)
     doc_path  = Path(doc_path)
 
-    if not store.is_initialized(repo_root):
-        return {"error": "repo not indexed — run `scope init` first"}
     if not doc_path.exists():
         return {"error": f"document not found: {doc_path}"}
+
+    # Auto-initialise the scope store if not yet done — doc ingest should work
+    # standalone (no prior `scope init` required). Memory + feature writes will
+    # still work; code symbol data simply won't be present until `scope index` runs.
+    if not store.is_initialized(repo_root):
+        store.ensure_index_dir(repo_root)
+        store.write_json(repo_root, "config", store.default_config())
 
     # --if-changed: skip if source hash matches what was stored from the last run
     if if_changed:

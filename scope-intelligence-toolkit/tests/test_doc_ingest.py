@@ -575,9 +575,12 @@ class TestIngestDocumentPython:
         result = ingest_document(repo, tmp_path / "nope.md")
         assert "error" in result
 
-    def test_uninitialised_repo_returns_error(self, tmp_path, md_file):
-        result = ingest_document(tmp_path, md_file)
-        assert "error" in result
+    def test_uninitialised_repo_auto_inits(self, tmp_path, md_file):
+        # ingest_document auto-initialises the scope store; no prior 'scope init' needed
+        result = ingest_document(tmp_path, md_file, overwrite=True)
+        assert "error" not in result, result
+        # .scope-intelligence/ should now exist
+        assert (tmp_path / ".scope-intelligence").exists()
 
 
 # ---------------------------------------------------------------------------

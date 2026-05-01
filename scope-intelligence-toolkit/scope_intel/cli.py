@@ -1874,8 +1874,7 @@ def _doc_export(
 def cmd_doc(args) -> int:
     if args.doc_cmd == "ingest":
         repo = _resolve_repo(args.repo)
-        if _not_indexed(repo):
-            return 2
+        # Note: _not_indexed check intentionally removed — ingest_document auto-inits
         result = ingest_document(
             repo,
             Path(args.doc),
@@ -1903,8 +1902,7 @@ def cmd_doc(args) -> int:
 
     if args.doc_cmd == "ingest-batch":
         repo = _resolve_repo(args.repo)
-        if _not_indexed(repo):
-            return 2
+        # Note: no _not_indexed check — ingest_document auto-inits the scope store
         batch_dir = Path(args.directory).resolve()
         if not batch_dir.is_dir():
             print(f"error: {batch_dir} is not a directory", file=sys.stderr)
@@ -1982,8 +1980,7 @@ def cmd_doc(args) -> int:
 
     if args.doc_cmd == "rebuild":
         repo = _resolve_repo(args.repo)
-        if _not_indexed(repo):
-            return 2
+        # Note: no _not_indexed check — ingest_document auto-inits
         # Step 1: clear generated/ (preserve curated)
         gen_dir = repo / ".ai-context" / "generated"
         cleared = 0
