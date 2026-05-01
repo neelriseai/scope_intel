@@ -223,6 +223,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
     p_list.add_argument("--pinned", action="store_true",
                         help="Show only pinned files.")
+    p_list.add_argument("--tag", metavar="TAG",
+                        help="Show only files with this tag.")
     p_list.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc fetch — retrieve content of a generated file
@@ -461,6 +463,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_snap_del.add_argument("name", help="Snapshot name to delete.")
     p_snap_del.add_argument("--repo", default=".")
     p_snap_del.add_argument("--json", action="store_true")
+
+    # doc tag — attach free-form labels to a .ai-context/ file entry
+    p_tag = doc_sub.add_parser(
+        "tag",
+        help=(
+            "Attach or remove free-form tags on a .ai-context/ file. "
+            "Tags let you group files (e.g. 'api', 'auth', 'reviewed') for filtered listing."
+        ),
+    )
+    p_tag.add_argument(
+        "file_id",
+        help="File id or partial name.",
+    )
+    p_tag.add_argument(
+        "--add", dest="add_tags", nargs="+", metavar="TAG",
+        help="Tag(s) to add.",
+    )
+    p_tag.add_argument(
+        "--remove", dest="remove_tags", nargs="+", metavar="TAG",
+        help="Tag(s) to remove.",
+    )
+    p_tag.add_argument(
+        "--clear", action="store_true",
+        help="Remove all tags from this file.",
+    )
+    p_tag.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_tag.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc report — full markdown health dashboard of .ai-context/ system
     p_drep = doc_sub.add_parser(
@@ -2069,6 +2098,106 @@ def _fmt_doc_report_to_str(r: dict) -> str:
     return buf.getvalue()
 
 
+def _doc_tag(
+    repo: Path,
+    name: str,
+    *,
+    add_tags: list[str] | None = None,
+    remove_tags: list[str] | None = None,
+    clear: bool = False,
+) -> dict:
+    """Add, remove, or clear tags on a generated .ai-context/ file.
+
+    Tags are stored in the file's entry in index.json as a list of strings.
+    For curated files, tags are stored in .ai-context/annotations.json under a
+    separate 'tags' key alongside annotations.
+
+    Returns {id, path, layer, tags[], action}.
+    """
+    match = _resolve_file_id(repo, name)
+    if match is None:
+        return {"error": f"no unique file matching '{name}' — use `scope doc list` to see ids"}
+    fid, rel = match
+
+    layer = "curated" if "/curated/" in rel else "generated"
+
+    if layer == "generated":
+        index_path = repo / ".ai-context" / "generated" / "index.json"
+        if not index_path.exists():
+            return {"error": "index.json not found — run `scope doc ingest` first"}
+        try:
+            idx = json.loads(index_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"index.json unreadable: {exc}"}
+
+        entry = next((e for e in idx.get("files", []) if e.get("path") == rel), None)
+        if entry is None:
+            return {"error": f"file '{fid}' not found in index.json"}
+
+        tags: list[str] = list(entry.get("tags", []))
+
+        if clear:
+            tags = []
+        else:
+            for t in (add_tags or []):
+                if t not in tags:
+                    tags.append(t)
+            for t in (remove_tags or []):
+                tags = [x for x in tags if x != t]
+
+        entry["tags"] = tags
+        index_path.write_text(json.dumps(idx, indent=2, ensure_ascii=False),
+                               encoding="utf-8")
+        action = "cleared" if clear else ("modified" if (add_tags or remove_tags) else "view")
+        return {"id": fid, "path": rel, "layer": layer, "tags": tags, "action": action}
+
+    else:
+        # Curated — use annotations.json with a separate 'tags' key
+        data = _load_annotations(repo)
+        entry = data.setdefault(rel, [])
+        # Tags stored as a special dict with marker key
+        tag_record: dict | None = None
+        for item in entry:
+            if isinstance(item, dict) and item.get("__type__") == "tags":
+                tag_record = item
+                break
+        if tag_record is None:
+            tag_record = {"__type__": "tags", "tags": []}
+            entry.append(tag_record)
+            data[rel] = entry
+
+        tags = list(tag_record.get("tags", []))
+        if clear:
+            tags = []
+        else:
+            for t in (add_tags or []):
+                if t not in tags:
+                    tags.append(t)
+            for t in (remove_tags or []):
+                tags = [x for x in tags if x != t]
+
+        tag_record["tags"] = tags
+        _save_annotations(repo, data)
+        action = "cleared" if clear else ("modified" if (add_tags or remove_tags) else "view")
+        return {"id": fid, "path": rel, "layer": layer, "tags": tags, "action": action}
+
+
+def _get_file_tags(repo: Path, rel_path: str, layer: str,
+                   index_files: list[dict], ann_data: dict) -> list[str]:
+    """Read the tags for a file from the appropriate store."""
+    if layer == "generated":
+        for entry in index_files:
+            if entry.get("path") == rel_path:
+                return list(entry.get("tags", []))
+        return []
+    else:
+        entries = ann_data.get(rel_path, [])
+        for item in entries:
+            if isinstance(item, dict) and item.get("__type__") == "tags":
+                return list(item.get("tags", []))
+        return []
+
+
 def _read_pinned(repo: Path) -> set[str]:
     """Read the set of pinned file paths from index.json (returns empty set if absent)."""
     index_path = repo / ".ai-context" / "generated" / "index.json"
@@ -3118,14 +3247,39 @@ def cmd_doc(args) -> int:
     if args.doc_cmd == "list":
         repo = _resolve_repo(args.repo)
         result = _doc_list(repo)
-        # --pinned filter: restrict to pinned files only
-        if getattr(args, "pinned", False) and "error" not in result:
-            pinned = _read_pinned(repo)
-            result["generated"] = [f for f in result.get("generated", [])
-                                   if f["path"] in pinned]
-            result["curated"]   = [f for f in result.get("curated", [])
-                                   if f["path"] in pinned]
-            result["total"]     = len(result["generated"]) + len(result["curated"])
+        if "error" not in result:
+            # --pinned filter
+            if getattr(args, "pinned", False):
+                pinned = _read_pinned(repo)
+                result["generated"] = [f for f in result.get("generated", [])
+                                       if f["path"] in pinned]
+                result["curated"]   = [f for f in result.get("curated", [])
+                                       if f["path"] in pinned]
+                result["total"]     = len(result["generated"]) + len(result["curated"])
+            # --tag filter
+            tag_filter = getattr(args, "tag", None)
+            if tag_filter:
+                index_files: list[dict] = []
+                idx_path = repo / ".ai-context" / "generated" / "index.json"
+                if idx_path.exists():
+                    try:
+                        index_files = json.loads(
+                            idx_path.read_text(encoding="utf-8")
+                        ).get("files", [])
+                    except Exception:  # noqa: BLE001
+                        pass
+                ann_data = _load_annotations(repo)
+                result["generated"] = [
+                    f for f in result.get("generated", [])
+                    if tag_filter in _get_file_tags(repo, f["path"], "generated",
+                                                    index_files, ann_data)
+                ]
+                result["curated"] = [
+                    f for f in result.get("curated", [])
+                    if tag_filter in _get_file_tags(repo, f["path"], "curated",
+                                                    index_files, ann_data)
+                ]
+                result["total"] = len(result["generated"]) + len(result["curated"])
         _emit(result, args.json, formatter=_fmt_doc_list)
         return 0 if "error" not in result else 2
 
@@ -3162,6 +3316,24 @@ def cmd_doc(args) -> int:
             clear=getattr(args, "clear", False),
         )
         _emit(result, args.json, formatter=_fmt_doc_annotate)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "tag":
+        repo = _resolve_repo(args.repo)
+        result = _doc_tag(
+            repo,
+            args.file_id,
+            add_tags=getattr(args, "add_tags", None),
+            remove_tags=getattr(args, "remove_tags", None),
+            clear=getattr(args, "clear", False),
+        )
+        if args.json:
+            print(json.dumps(result, indent=2))
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        else:
+            tags_str = ", ".join(result["tags"]) if result["tags"] else "(none)"
+            print(f"[{result['layer']}] {result['id']}  tags: {tags_str}")
         return 0 if "error" not in result else 2
 
     if args.doc_cmd == "report":

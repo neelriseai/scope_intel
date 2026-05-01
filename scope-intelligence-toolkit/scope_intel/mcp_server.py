@@ -504,6 +504,40 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_tag",
+        "description": (
+            "Add, remove, or clear free-form tags on a .ai-context/ file. "
+            "Tags let you group files (e.g. 'api', 'auth', 'reviewed') for filtered listing. "
+            "Call doc_list with tag filter to find tagged files."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "file_id": {
+                    "type": "string",
+                    "description": "File id or partial name.",
+                },
+                "add_tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags to add.",
+                },
+                "remove_tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags to remove.",
+                },
+                "clear": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Remove all tags from this file.",
+                },
+            },
+            "required": ["file_id"],
+        },
+    },
+    {
         "name": "doc_report",
         "description": (
             "Generate a comprehensive status report of the entire .ai-context/ system: "
@@ -1059,6 +1093,16 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_templates_created": total_tmpl,
             "results":                 results,
         }
+
+    if name == "doc_tag":
+        from .cli import _doc_tag
+        return _doc_tag(
+            repo,
+            arguments["file_id"],
+            add_tags=arguments.get("add_tags"),
+            remove_tags=arguments.get("remove_tags"),
+            clear=arguments.get("clear", False),
+        )
 
     if name == "doc_report":
         from .cli import _doc_report

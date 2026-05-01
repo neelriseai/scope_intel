@@ -1974,3 +1974,93 @@ class TestDocReport:
         result = _doc_report(repo)
         assert result["budget_hint"]
         assert "context" in result["budget_hint"].lower()
+
+
+# ---------------------------------------------------------------------------
+# TestDocTag
+# ---------------------------------------------------------------------------
+
+class TestDocTag:
+    """Tests for _doc_tag — free-form labels on .ai-context/ file entries."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def _first_generated_id(self, repo):
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        files = [f for f in idx["files"] if f["layer"] == "generated"]
+        assert files
+        return files[0]["id"]
+
+    def test_add_tag(self, repo, md_file):
+        from scope_intel.cli import _doc_tag
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        result = _doc_tag(repo, fid, add_tags=["api", "reviewed"])
+        assert "error" not in result
+        assert "api" in result["tags"]
+        assert "reviewed" in result["tags"]
+
+    def test_tags_persist_in_index_json(self, repo, md_file):
+        from scope_intel.cli import _doc_tag
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        _doc_tag(repo, fid, add_tags=["backend"])
+        # Read back
+        result = _doc_tag(repo, fid)
+        assert "backend" in result["tags"]
+
+    def test_remove_tag(self, repo, md_file):
+        from scope_intel.cli import _doc_tag
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        _doc_tag(repo, fid, add_tags=["api", "legacy"])
+        result = _doc_tag(repo, fid, remove_tags=["legacy"])
+        assert "api" in result["tags"]
+        assert "legacy" not in result["tags"]
+
+    def test_clear_tags(self, repo, md_file):
+        from scope_intel.cli import _doc_tag
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        _doc_tag(repo, fid, add_tags=["x", "y", "z"])
+        result = _doc_tag(repo, fid, clear=True)
+        assert result["tags"] == []
+        assert result["action"] == "cleared"
+
+    def test_tag_unknown_file_returns_error(self, repo, md_file):
+        from scope_intel.cli import _doc_tag
+        self._ingest(repo, md_file)
+        result = _doc_tag(repo, "xyzzy-no-such-file", add_tags=["x"])
+        assert "error" in result
+
+    def test_list_tag_filter(self, repo, md_file):
+        """scope doc list --tag <tag> returns only tagged files (generated layer)."""
+        from scope_intel.cli import _doc_tag, _get_file_tags, _load_annotations
+        self._ingest(repo, md_file)
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        # Pick the first explicitly-generated file (layer=="generated")
+        gen_entries = [f for f in idx["files"] if f.get("layer") == "generated"]
+        assert gen_entries, "need at least one generated file"
+        fid = gen_entries[0]["id"]
+        rel = gen_entries[0]["path"]
+        _doc_tag(repo, fid, add_tags=["my-special-tag"])
+
+        # Re-read index AFTER tag write so we see the updated tags field
+        idx_updated = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        index_files = idx_updated["files"]
+        ann_data = _load_annotations(repo)
+        tags = _get_file_tags(repo, rel, "generated", index_files, ann_data)
+        assert "my-special-tag" in tags
+
+        # Other generated files should NOT have the tag
+        other_gen = [f for f in index_files if f["path"] != rel and f.get("layer") == "generated"]
+        for f in other_gen:
+            other_tags = _get_file_tags(repo, f["path"], "generated", index_files, ann_data)
+            assert "my-special-tag" not in other_tags
