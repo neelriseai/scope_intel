@@ -2588,3 +2588,184 @@ class TestDocIngestWatch:
         res = _doc_ingest_watch_tick(repo, watch, state, glob_patterns=("*.md",))
         assert res["scanned"] == 1
         assert len(res["ingested"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Live integration tests — require Ollama + qwen2.5:7b running locally.
+# Skipped automatically in CI or when Ollama is unavailable.
+# ---------------------------------------------------------------------------
+
+_OLLAMA_URL   = "http://localhost:11434"
+_OLLAMA_MODEL = "qwen2.5:7b"
+# Generous timeout: qwen2.5:7b can take 90s+ on first call (cold GPU load)
+_OLLAMA_TIMEOUT = 180
+
+def _ollama_available() -> bool:
+    """Return True if Ollama is reachable, qwen2.5:7b is listed, AND responds to a generate call.
+
+    Checking /api/tags alone isn't enough — the model may be listed but not yet loaded into
+    GPU memory (cold-start).  We do a minimal generate call with a 30s timeout to confirm
+    the model is actually serving, which also warms the model for the real tests.
+    """
+    from scope_intel.core.llm_client import OllamaClient
+    client = OllamaClient(model=_OLLAMA_MODEL, url=_OLLAMA_URL, timeout=_OLLAMA_TIMEOUT)
+    if not client.is_available():
+        return False
+    # Warm-up generate: tiny prompt, short response.  If this returns None the model is
+    # not yet ready (still loading) and we skip the suite.
+    warmup = client._generate('Say "ok" as JSON: {"status":"ok"}')
+    return warmup is not None
+
+
+_LIVE_DOC = """\
+# Scope Intelligence Toolkit
+
+## Overview
+Scope Intelligence Toolkit is a CLI tool that indexes repositories and answers
+scope queries: which features are affected by a change, which symbols call which,
+and which tests need to run.
+
+## Architecture
+The system has three layers:
+- **Deterministic Engine** — Python AST indexer, no external dependencies.
+- **Memory Layer** — MemPalace stores semantic, episodic, and procedural memories.
+- **MCP Server** — JSON-RPC 2.0 over stdio exposing 15+ tools to Claude Code.
+
+## Constraints
+- Zero external Python dependencies for the core toolkit.
+- All storage is JSONL — no PostgreSQL, no Chroma, no pgvector.
+- Ollama is called as a tool; Python handles routing and writes.
+
+## Roadmap
+- Phase 6: cross-repo federation, confidence decay, agent-triggered captures.
+- Phase 7: RAG retrieval over generated .ai-context/ files.
+
+## Current Phase
+Phase 5 is complete. Phase 6 design doc is committed. Implementation pending.
+"""
+
+
+@pytest.mark.skipif(not _ollama_available(), reason="Ollama not available or qwen2.5:7b not loaded")
+class TestLLMIngestLive:
+    """End-to-end integration tests for mode=llm ingest pipeline.
+
+    These tests hit a real Ollama instance and verify that all three LLM
+    pipeline steps produce meaningful output on a known design document.
+    Run with: pytest tests/test_doc_ingest.py::TestLLMIngestLive -v
+    """
+
+    @pytest.fixture
+    def repo(self, tmp_path):
+        from scope_intel.core import store
+        store.ensure_index_dir(tmp_path)
+        store.write_json(tmp_path, "config", store.default_config())
+        return tmp_path
+
+    @pytest.fixture
+    def design_doc(self, tmp_path):
+        p = tmp_path / "design.md"
+        p.write_text(_LIVE_DOC, encoding="utf-8")
+        return p
+
+    def test_llm_probe_returns_content_readable(self, design_doc):
+        """llm-probe reads the file locally and Ollama classifies it."""
+        from scope_intel.core.llm_client import probe_file_path
+        result = probe_file_path(str(design_doc), url=_OLLAMA_URL, model=_OLLAMA_MODEL,
+                                 timeout=_OLLAMA_TIMEOUT)
+        assert result["can_read_content"], (
+            f"Ollama did not return a valid JSON classification. "
+            f"error={result.get('error')!r}  llm_response={result.get('llm_response')!r}"
+        )
+        assert result["bytes_sent"] > 0
+        assert result.get("llm_response", {}).get("type"), "expected a 'type' field in LLM response"
+
+    def test_global_summary_step(self, design_doc):
+        """Step 2: global_summary() returns project_name and at least one component."""
+        from scope_intel.core.llm_client import OllamaClient
+        client = OllamaClient(model=_OLLAMA_MODEL, url=_OLLAMA_URL, timeout=_OLLAMA_TIMEOUT)
+        full_text = design_doc.read_text(encoding="utf-8")
+        result = client.global_summary(full_text)
+        assert result is not None, "global_summary returned None — LLM call failed"
+        assert isinstance(result, dict)
+        assert result.get("project_name"), f"project_name missing: {result}"
+        # purpose or components must be non-empty for a meaningful extraction
+        has_substance = bool(result.get("purpose") or result.get("components"))
+        assert has_substance, f"global_summary lacks purpose and components: {result}"
+
+    def test_classify_chunk_step(self, design_doc):
+        """Step 3: classify_chunk() returns a valid target_file and category for each section."""
+        from scope_intel.core.llm_client import OllamaClient
+        from scope_intel.adapters.doc_reader import read_document_structured
+        client = OllamaClient(model=_OLLAMA_MODEL, url=_OLLAMA_URL, timeout=_OLLAMA_TIMEOUT)
+
+        struct = read_document_structured(design_doc)
+        assert "error" not in struct, f"read_document_structured failed: {struct}"
+        chunks = struct["chunks"]
+        assert chunks, "design doc produced no chunks"
+
+        global_ctx = client.global_summary(struct["full_text"]) or {
+            "project_name": "Scope Intelligence Toolkit",
+            "components": [],
+        }
+
+        classified = 0
+        for chunk in chunks:
+            result = client.classify_chunk(chunk, global_ctx)
+            if result is not None:
+                assert isinstance(result, dict)
+                assert "target_file" in result, f"classify_chunk missing target_file: {result}"
+                assert "category" in result, f"classify_chunk missing category: {result}"
+                classified += 1
+
+        assert classified > 0, (
+            f"classify_chunk returned None for all {len(chunks)} chunks — "
+            "LLM may be failing to parse the prompt or schema"
+        )
+
+    def test_module_map_pass_step(self):
+        """Step 5: module_map_pass() returns non-empty markdown given summaries."""
+        from scope_intel.core.llm_client import OllamaClient
+        client = OllamaClient(model=_OLLAMA_MODEL, url=_OLLAMA_URL, timeout=_OLLAMA_TIMEOUT)
+        summaries = [
+            {"title": "Deterministic Engine", "summary": "Python AST indexer with zero deps."},
+            {"title": "Memory Layer",          "summary": "JSONL-backed semantic + episodic memory."},
+            {"title": "MCP Server",            "summary": "JSON-RPC 2.0 stdio server exposing 15 tools."},
+        ]
+        result = client.module_map_pass(summaries)
+        assert result is not None, "module_map_pass returned None — LLM call failed"
+        assert len(result.strip()) > 50, f"module_map_pass output too short: {result!r}"
+        # Should contain at least one module name
+        assert any(s["title"] in result for s in summaries), (
+            "module_map_pass output doesn't mention any module titles"
+        )
+
+    def test_full_ingest_llm_pipeline(self, repo, design_doc):
+        """End-to-end: ingest_document(mode='llm') runs all 5 steps and writes files."""
+        from scope_intel.core.doc_ingestor import ingest_document
+        result = ingest_document(
+            repo,
+            design_doc,
+            mode="llm",
+            ollama_model=_OLLAMA_MODEL,
+            ollama_url=_OLLAMA_URL,
+            overwrite=True,
+        )
+        assert "error" not in result, f"ingest_document failed: {result.get('error')}"
+        assert result.get("mode") == "llm", f"expected mode=llm, got {result.get('mode')!r}"
+        assert result.get("sections_parsed", 0) > 0, "no sections parsed"
+        assert result.get("files_written", 0) > 0, "no files written"
+        # Verify at least one .ai-context/generated/*.md exists on disk
+        gen_dir = repo / ".ai-context" / "generated"
+        md_files = list(gen_dir.glob("*.md"))
+        assert md_files, f"no .md files in {gen_dir}"
+        # LLM pipeline stats must be present and at least one chunk classified by the LLM
+        # (not just Python fallback — that would mean mode=llm had no actual LLM calls)
+        assert result.get("llm_chunks_classified") is not None, (
+            "llm_chunks_classified missing from result — LLM pipeline may have short-circuited"
+        )
+        llm_by_llm = result.get("llm_chunks_by_llm", 0)
+        assert llm_by_llm > 0, (
+            f"llm_chunks_by_llm={llm_by_llm}: Ollama responded but classified 0 chunks. "
+            f"All {result.get('llm_chunks_classified')} chunks used Python fallback — "
+            "check Ollama is serving the model and not timing out."
+        )

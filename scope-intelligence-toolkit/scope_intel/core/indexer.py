@@ -230,6 +230,8 @@ def build_index(repo_root: Path, *, only_files: Optional[list] = None,
                 entry["reads"] = s.reads
             if s.writes:
                 entry["writes"] = s.writes
+            if getattr(s, "bases", None):
+                entry["bases"] = s.bases
             symbols_out.append(entry)
 
         if parsed.test:

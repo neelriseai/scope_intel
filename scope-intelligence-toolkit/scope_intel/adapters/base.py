@@ -26,6 +26,7 @@ class ParsedSymbol:
     params: list = field(default_factory=list)
     reads: list = field(default_factory=list)   # data/attrs read by this symbol
     writes: list = field(default_factory=list)  # data/attrs written by this symbol
+    bases: list = field(default_factory=list)   # base class names (for class symbols)
 
 
 @dataclass

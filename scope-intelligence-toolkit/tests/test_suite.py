@@ -38,6 +38,13 @@ from scope_intel.core.query_engine import (
 from scope_intel.core.tracker import compute_savings_summary, compute_global_summary, log_query
 from scope_intel.core.reporter import format_terminal, format_html, format_global_terminal, format_global_html
 from scope_intel.core.diff import compute_diff_scope
+from scope_intel.core.compact_context import (
+    build_compact_artifacts,
+    compact_stats,
+    decompress_compact_file,
+    get_inventory,
+    validate_compact_artifacts,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +319,8 @@ class TestMCPServer:
         r = json.loads(out)
         names = [t["name"] for t in r["result"]["tools"]]
         assert "scope_summary" in names
+        assert "scope_inventory" in names
+        assert "compact_build" in names
         assert "mem_add" in names
         assert "mem_fetch" in names
 
@@ -1234,3 +1243,241 @@ class TestConflictDetection:
     def test_not_indexed_returns_error(self, tmp_path):
         r = detect_conflicts(tmp_path)
         assert "error" in r
+
+
+# ===========================================================================
+# Graph renderer
+# ===========================================================================
+
+@pytest.fixture()
+def class_repo(tmp_path):
+    """Repo with classes, inheritance, and a call edge for graph tests."""
+    (tmp_path / "models.py").write_text(
+        "class Animal:\n"
+        "    def speak(self): pass\n"
+        "    def move(self): pass\n\n"
+        "class Dog(Animal):\n"
+        "    def speak(self): self.move()\n"
+        "    def fetch(self): pass\n\n"
+        "class Cat(Animal):\n"
+        "    def speak(self): pass\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "runner.py").write_text(
+        "from models import Dog\n"
+        "def run():\n"
+        "    d = Dog()\n"
+        "    d.speak()\n",
+        encoding="utf-8",
+    )
+    store.ensure_index_dir(tmp_path)
+    store.write_json(tmp_path, "config", store.default_config())
+    build_index(tmp_path)
+    return tmp_path
+
+
+class TestGraphRenderer:
+    def test_class_diagram_mermaid_contains_class_names(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert "error" not in r, r.get("error")
+        assert r["format"] == "mermaid"
+        assert "classDiagram" in r["diagram"]
+        assert "Animal" in r["diagram"]
+        assert "Dog" in r["diagram"]
+        assert "Cat" in r["diagram"]
+
+    def test_class_diagram_lists_methods(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert "error" not in r
+        # methods should appear inside the class block
+        assert "speak" in r["diagram"]
+        assert "fetch" in r["diagram"]
+
+    def test_class_diagram_inheritance_edge(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert "error" not in r
+        # Mermaid inheritance: Child <|-- Parent (or reverse)
+        assert "<|--" in r["diagram"]
+
+    def test_class_diagram_dot_format(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py",
+                         kind="class", format="dot")
+        assert "error" not in r
+        assert r["format"] == "dot"
+        assert "digraph" in r["diagram"]
+        assert "Animal" in r["diagram"]
+
+    def test_deps_graph_mermaid(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="runner.py", kind="deps")
+        assert "error" not in r
+        assert "graph TD" in r["diagram"]
+        # runner.py should appear as a node
+        assert "runner" in r["diagram"].lower()
+
+    def test_call_graph_mermaid(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="symbol", query="speak", kind="calls")
+        assert "error" not in r
+        assert "graph LR" in r["diagram"]
+        assert "speak" in r["diagram"].lower()
+
+    def test_fenced_block_wraps_diagram(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert r["fenced"].startswith("```mermaid\n")
+        assert r["fenced"].endswith("\n```")
+
+    def test_unknown_kind_returns_error(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="unknown")  # type: ignore[arg-type]
+        assert "error" in r
+
+    def test_not_indexed_returns_error(self, tmp_path):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(tmp_path, target="file", query="x.py", kind="class")
+        assert "error" in r
+
+    def test_missing_file_returns_error(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="nonexistent.py", kind="class")
+        assert "error" in r
+
+    def test_bases_captured_in_index(self, class_repo):
+        """Regression: python_adapter must store bases so graph can draw inheritance."""
+        syms = store.read_json(class_repo, "symbols", {"symbols": []})["symbols"]
+        dog = next((s for s in syms if s["name"] == "Dog"), None)
+        assert dog is not None, "Dog class not indexed"
+        assert "Animal" in dog.get("bases", []), (
+            f"Dog.bases={dog.get('bases')} — inheritance not captured by adapter"
+        )
+
+    def test_node_and_edge_counts_returned(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert isinstance(r["nodes"], int) and r["nodes"] > 0
+        assert isinstance(r["edges"], int)
+        assert isinstance(r["truncated"], bool)
+
+
+# ===========================================================================
+# Compact context sidecars and inventory
+# ===========================================================================
+
+class TestCompactContext:
+    def test_build_ai_context_sidecar_keeps_original(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        original = "# Overview\n\nThe system is responsible for indexing repositories.\n"
+        source = gen / "overview.md"
+        source.write_text(original, encoding="utf-8")
+
+        result = build_compact_artifacts(repo, target="ai-context")
+
+        assert result["total_written"] == 1
+        assert source.read_text(encoding="utf-8") == original
+        compact_rel = result["written"][0]["compact"]
+        assert (repo / compact_rel).exists()
+        assert result["source_tokens_est"] > 0
+        assert result["dsl_tokens_est"] > 0
+
+    def test_validate_ai_context_sidecar_round_trips_exact_text(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        original = "# Contract\n\nMust always validate payloads before persist.\n"
+        (gen / "contract.md").write_text(original, encoding="utf-8")
+        build_compact_artifacts(repo, target="ai-context")
+
+        result = validate_compact_artifacts(repo, target="ai-context")
+
+        assert result["ok"] is True
+        assert result["failed"] == 0
+
+    def test_validate_fails_when_source_changes_after_compact(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        source = gen / "roadmap.md"
+        source.write_text("# Roadmap\n\nPhase 1 complete.\n", encoding="utf-8")
+        build_compact_artifacts(repo, target="ai-context")
+        source.write_text("# Roadmap\n\nPhase 2 changed.\n", encoding="utf-8")
+
+        result = validate_compact_artifacts(repo, target="ai-context")
+
+        assert result["ok"] is False
+        assert result["failed"] == 1
+
+    def test_decompress_compact_file_returns_original_payload(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        original = "# Memory\n\nRedis cache ttl 24h.\n"
+        source = gen / "memory.md"
+        source.write_text(original, encoding="utf-8")
+        built = build_compact_artifacts(repo, target="ai-context")
+
+        result = decompress_compact_file(repo / built["written"][0]["compact"])
+
+        assert result["content"] == original
+        assert result["meta"]["source"].endswith("memory.md")
+
+    def test_build_skill_sidecar(self, repo):
+        skill_dir = repo / ".agents" / "skills" / "sample"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "# Skill\n\nUse this skill when debugging authentication issues.\n",
+            encoding="utf-8",
+        )
+
+        result = build_compact_artifacts(repo, target="skills")
+
+        assert result["total_written"] == 1
+        assert result["written"][0]["kind"] == "skill"
+        assert validate_compact_artifacts(repo, target="skills")["ok"] is True
+
+    def test_build_memory_sidecar(self, repo):
+        add_memory(repo, "semantic", "auth uses JWT signing", confidence=0.9)
+
+        result = build_compact_artifacts(repo, target="memory")
+
+        assert result["total_written"] == 1
+        assert result["written"][0]["kind"] == "memory"
+        assert validate_compact_artifacts(repo, target="memory")["ok"] is True
+
+    def test_compact_stats_aggregates_sidecars(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        (gen / "overview.md").write_text("# Overview\n\nUseful context.\n", encoding="utf-8")
+        build_compact_artifacts(repo, target="ai-context")
+
+        result = compact_stats(repo, target="ai-context")
+
+        assert result["total"] == 1
+        assert result["source_tokens_est"] > 0
+        assert result["dsl_tokens_est"] > 0
+
+
+class TestInventory:
+    def test_inventory_lists_files_without_source_scan(self, repo):
+        result = get_inventory(repo, include_symbols=False)
+
+        assert "error" not in result
+        assert result["totals"]["files"] >= 3
+        assert "symbols" not in result
+        assert any(f["file"] == "src/auth/login.py" for f in result["files"])
+
+    def test_inventory_lists_classes(self, class_repo):
+        result = get_inventory(class_repo)
+
+        assert result["totals"]["classes"] == 3
+        names = [c["name"] for c in result["classes"]]
+        assert {"Animal", "Dog", "Cat"}.issubset(set(names))
+
+    def test_inventory_feature_filter(self, repo):
+        result = get_inventory(repo, feature="auth")
+
+        assert "error" not in result
+        assert result["totals"]["files"] >= 1
+        assert all(f["feature"] == "auth" for f in result["files"])

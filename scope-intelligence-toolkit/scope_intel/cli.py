@@ -51,6 +51,13 @@ from .core.mempalace import (
     touch_memory,
 )
 from .core.doc_ingestor import ingest_document
+from .core.compact_context import (
+    build_compact_artifacts,
+    compact_stats,
+    decompress_compact_file,
+    get_inventory,
+    validate_compact_artifacts,
+)
 from .core.reporter import format_global_html, format_global_terminal, format_html, format_terminal
 from .core.summarizer import feature_one_liner
 from .core.tracker import compute_global_summary, compute_savings_summary, log_query
@@ -99,6 +106,17 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p_sum)
 
     # features — list all
+    p_inv = sub.add_parser(
+        "inventory",
+        help="List indexed files, classes, and symbols without reading source files.",
+    )
+    _add_common(p_inv)
+    p_inv.add_argument("--feature", help="Restrict inventory to one feature id.")
+    p_inv.add_argument(
+        "--no-symbols", action="store_true",
+        help="Omit the symbol list and return only files/classes/totals.",
+    )
+
     p_lf = sub.add_parser("features", help="List all detected features.")
     _add_common(p_lf)
 
@@ -150,6 +168,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("ref", nargs="?", default="HEAD~1",
                         help="Git ref to diff against (default: HEAD~1).")
 
+    # graph — Mermaid / DOT diagram of classes, deps, or call chains
+    p_graph = sub.add_parser("graph", help="Generate Mermaid or DOT diagram from the index.")
+    _add_common(p_graph)
+    p_graph.add_argument("query", help="Feature id, file path, or symbol name.")
+    p_graph.add_argument(
+        "--target", choices=["feature", "file", "symbol"], default="feature",
+        help="What 'query' refers to (default: feature).",
+    )
+    p_graph.add_argument(
+        "--kind", choices=["class", "deps", "calls"], default="class",
+        help=(
+            "class = classDiagram (classes + methods + inheritance);  "
+            "deps  = import dependency graph (file → file);  "
+            "calls = call graph (callers → symbol → callees)."
+        ),
+    )
+    p_graph.add_argument(
+        "--format", choices=["mermaid", "dot"], default="mermaid",
+        help="Output format (default: mermaid).",
+    )
+    p_graph.add_argument(
+        "--max-nodes", type=int, default=60, metavar="N",
+        help="Cap diagram at N nodes for readability (default: 60).",
+    )
+    p_graph.add_argument(
+        "--output", metavar="FILE",
+        help="Write diagram to FILE instead of stdout.",
+    )
+
     # report — token savings dashboard
     p_rep = sub.add_parser("report", help="Token savings report from past queries.")
     p_rep.add_argument("--repo", default=".")
@@ -169,6 +216,58 @@ def build_parser() -> argparse.ArgumentParser:
 
     # serve — MCP stdio server
     sub.add_parser("serve", help="Start MCP JSON-RPC 2.0 stdio server.")
+
+    # compact sidecars
+    p_compact = sub.add_parser(
+        "compact",
+        help="Build and validate compact agent-facing sidecars for context files.",
+    )
+    compact_sub = p_compact.add_subparsers(dest="compact_cmd", required=True)
+
+    p_cbuild = compact_sub.add_parser(
+        "build",
+        help="Create compact DSL sidecars while keeping originals canonical.",
+    )
+    p_cbuild.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_cbuild.add_argument(
+        "--target", choices=["ai-context", "skills", "memory", "all"],
+        default="ai-context",
+        help="What to compact (default: ai-context).",
+    )
+    p_cbuild.add_argument(
+        "--no-overwrite", action="store_true",
+        help="Skip sidecars that already exist.",
+    )
+    p_cbuild.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
+    p_cstats = compact_sub.add_parser(
+        "stats",
+        help="Show token estimates for compact sidecars.",
+    )
+    p_cstats.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_cstats.add_argument(
+        "--target", choices=["ai-context", "skills", "memory", "all"],
+        default="all",
+    )
+    p_cstats.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
+    p_cval = compact_sub.add_parser(
+        "validate",
+        help="Decompress compact sidecars and compare them to current originals.",
+    )
+    p_cval.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_cval.add_argument(
+        "--target", choices=["ai-context", "skills", "memory", "all"],
+        default="all",
+    )
+    p_cval.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
+    p_cdec = compact_sub.add_parser(
+        "decompress",
+        help="Print exact original content from one compact sidecar.",
+    )
+    p_cdec.add_argument("file", help="Path to a .scope compact sidecar.")
+    p_cdec.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc — document ingestion
     p_doc = sub.add_parser("doc", help="Document ingestion — parse design docs into .ai-context/.")
@@ -971,10 +1070,41 @@ def _fmt_features_list(payload: dict) -> None:
         print(f"- {feature_one_liner(f)}")
 
 
+def _fmt_inventory(payload: dict) -> None:
+    if "error" in payload:
+        print(payload["error"]); return
+    totals = payload.get("totals", {})
+    scope = f" feature={payload['feature']}" if payload.get("feature") else ""
+    print(
+        f"inventory{scope}: files={totals.get('files', 0)}  "
+        f"classes={totals.get('classes', 0)}  "
+        f"functions={totals.get('functions', 0)}  "
+        f"symbols={totals.get('symbols', 0)}"
+    )
+    classes = payload.get("classes", [])
+    if classes:
+        print("\nclasses:")
+        for cls in classes[:40]:
+            bases = f" bases={','.join(cls.get('bases') or [])}" if cls.get("bases") else ""
+            print(f"  - {cls['name']}  {cls['file']}:{cls['line']}{bases}")
+        if len(classes) > 40:
+            print(f"  ... +{len(classes) - 40} more")
+    print("\nfiles:")
+    for f in payload.get("files", [])[:80]:
+        print(
+            f"  - {f['file']}  lang={f.get('language') or '?'}  "
+            f"feature={f.get('feature') or '-'}  symbols={f.get('symbols', 0)}"
+        )
+    if len(payload.get("files", [])) > 80:
+        print(f"  ... +{len(payload['files']) - 80} more")
+
+
 def _fmt_feature(s: dict) -> None:
     if "error" in s:
         print(s["error"])
-        if "available" in s:
+        if s.get("suggestions"):
+            print("did you mean: " + ", ".join(s["suggestions"]))
+        elif "available" in s:
             print("available: " + ", ".join(s["available"]))
         return
     f = s["feature"]
@@ -1045,12 +1175,16 @@ def _fmt_symbol(s: dict) -> None:
             print(f"  writes: {', '.join(sym['writes'][:8])}")
         if m.get("callees"):
             print("  calls:")
-            for c in m["callees"][:10]:
+            for c in m["callees"][:25]:
                 print(f"    - {c.get('id') or c.get('name')}  [{c.get('file', '')}]")
+            if len(m["callees"]) > 25:
+                print(f"    ... {len(m['callees']) - 25} more — run `scope callees {sym['id']}` for the full list")
         if m.get("callers"):
             print("  called by:")
-            for c in m["callers"][:10]:
+            for c in m["callers"][:25]:
                 print(f"    - {c['id']}  [{c.get('file', '')}]")
+            if len(m["callers"]) > 25:
+                print(f"    ... {len(m['callers']) - 25} more — run `scope callers {sym['id']}` for the full list")
         print()
 
 
@@ -1302,7 +1436,8 @@ def _fmt_diff(s: dict) -> None:
     print(f"diff vs {s.get('ref')}")
     changed = s.get("changed", [])
     removed = s.get("removed", [])
-    not_indexed = s.get("not_in_index", [])
+    new_unindexed      = s.get("new_unindexed",      s.get("not_in_index", []))
+    modified_unindexed = s.get("modified_unindexed", [])
     print(f"\nchanged ({len(changed)}):")
     for f in changed:
         print(f"  ~ {f}")
@@ -1310,9 +1445,13 @@ def _fmt_diff(s: dict) -> None:
         print(f"\nremoved ({len(removed)}):")
         for f in removed:
             print(f"  - {f}")
-    if not_indexed:
-        print(f"\nnot in index (new files?):")
-        for f in not_indexed:
+    if modified_unindexed:
+        print(f"\nmodified (not yet indexed — run `scope index` to add):")
+        for f in modified_unindexed:
+            print(f"  ~ {f}")
+    if new_unindexed:
+        print(f"\nnew files (not yet indexed — run `scope index` to add):")
+        for f in new_unindexed:
             print(f"  + {f}")
     direct = s.get("direct_impact", [])
     trans = s.get("transitive_impact", [])
@@ -1389,6 +1528,21 @@ def cmd_summary(args) -> int:
     repo = _resolve_repo(args.repo)
     if _not_indexed(repo): return 2
     _emit(get_repo_summary(repo), args.json, formatter=_fmt_summary)
+    return 0
+
+
+def cmd_inventory(args) -> int:
+    repo = _resolve_repo(args.repo)
+    if _not_indexed(repo): return 2
+    result = get_inventory(
+        repo,
+        feature=getattr(args, "feature", None),
+        include_symbols=not getattr(args, "no_symbols", False),
+    )
+    _emit(result, args.json, formatter=_fmt_inventory)
+    if "error" not in result:
+        files = [f["file"] for f in result.get("files", [])]
+        log_query(repo, "inventory", {"feature": getattr(args, "feature", None)}, files)
     return 0
 
 
@@ -1520,6 +1674,37 @@ def cmd_touchpoints(args) -> int:
     return 0
 
 
+def cmd_graph(args) -> int:
+    from .core.graph_renderer import render_graph
+    repo = _resolve_repo(args.repo)
+    if _not_indexed(repo): return 2
+    result = render_graph(
+        repo,
+        target=args.target,
+        query=args.query,
+        kind=args.kind,
+        format=args.format,
+        max_nodes=args.max_nodes,
+    )
+    if "error" in result:
+        print(f"error: {result['error']}", file=__import__("sys").stderr)
+        return 1
+    if args.json:
+        import json as _json
+        print(_json.dumps(result, indent=2))
+        return 0
+    diagram = result["fenced"]
+    if hasattr(args, "output") and args.output:
+        Path(args.output).write_text(diagram, encoding="utf-8")
+        print(f"diagram written to {args.output}  "
+              f"({result['nodes']} nodes, {result['edges']} edges)")
+    else:
+        print(diagram)
+        print(f"\n# {result['nodes']} nodes  {result['edges']} edges"
+              + ("  (truncated)" if result.get("truncated") else ""))
+    return 0
+
+
 def cmd_diff(args) -> int:
     repo = _resolve_repo(args.repo)
     if _not_indexed(repo): return 2
@@ -1566,6 +1751,41 @@ def cmd_global_report(args) -> int:
     else:
         print(format_global_terminal(g))
     return 0
+
+
+def cmd_compact(args) -> int:
+    if args.compact_cmd == "decompress":
+        result = decompress_compact_file(Path(args.file))
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        else:
+            print(result["content"])
+        return 0 if "error" not in result else 2
+
+    repo = _resolve_repo(args.repo)
+    if args.compact_cmd == "build":
+        result = build_compact_artifacts(
+            repo,
+            target=args.target,
+            overwrite=not args.no_overwrite,
+        )
+        _emit(result, args.json, formatter=_fmt_compact_result)
+        return 0 if "error" not in result else 2
+
+    if args.compact_cmd == "stats":
+        result = compact_stats(repo, target=args.target)
+        _emit(result, args.json, formatter=_fmt_compact_result)
+        return 0 if "error" not in result else 2
+
+    if args.compact_cmd == "validate":
+        result = validate_compact_artifacts(repo, target=args.target)
+        _emit(result, args.json, formatter=_fmt_compact_validate)
+        return 0 if result.get("ok", False) else 1
+
+    print(f"unknown compact subcommand: {args.compact_cmd}", file=sys.stderr)
+    return 2
 
 
 def cmd_serve(_args) -> int:
@@ -3297,8 +3517,6 @@ def _fmt_doc_stats(r: dict) -> None:
         print()
 
     print(f"  total: {r['total_chars']:,} chars  ~{r['total_tokens']:,} tokens")
-
-    # Context budget hints
     token_budget = r["total_tokens"]
     if token_budget < 8_000:
         hint = "fits easily in a single 8k context window"
@@ -3307,8 +3525,49 @@ def _fmt_doc_stats(r: dict) -> None:
     elif token_budget < 128_000:
         hint = "fits in a 128k context window"
     else:
-        hint = "⚠ exceeds 128k tokens — consider splitting or using scope doc fetch selectively"
+        hint = "exceeds 128k tokens - consider splitting or using scope doc fetch selectively"
     print(f"  budget: {hint}")
+
+
+def _fmt_compact_result(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    print(
+        f"compact {r.get('target', 'all')}: "
+        f"{r.get('total_written', r.get('total', 0))} file(s)  "
+        f"~{r.get('source_tokens_est', 0):,} -> "
+        f"~{r.get('dsl_tokens_est', 0):,} tokens  "
+        f"saved ~{r.get('saved_tokens_est', 0):,} "
+        f"({r.get('saving_percent_est', 0.0)}%)"
+    )
+    for item in r.get("written", r.get("files", []))[:20]:
+        if item.get("error"):
+            print(f"  ! {item.get('compact')}: {item['error']}")
+            continue
+        path = item.get("compact") or item.get("source")
+        print(
+            f"  - {path}  "
+            f"{item.get('source_tokens', 0)} -> {item.get('dsl_tokens', 0)} tok"
+        )
+    count = len(r.get("written", r.get("files", [])))
+    if count > 20:
+        print(f"  ... +{count - 20} more")
+    if r.get("skipped"):
+        print(f"  skipped: {len(r['skipped'])}")
+
+
+def _fmt_compact_validate(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    status = "ok" if r.get("ok") else "failed"
+    print(f"compact validate {r.get('target', 'all')}: {status}  "
+          f"{r.get('total', 0)} checked  {r.get('failed', 0)} failed")
+    for item in r.get("results", []):
+        marker = "OK" if item.get("ok") else "FAIL"
+        print(f"  {marker} {item.get('compact')} -> {item.get('source')}")
+        if item.get("error"):
+            print(f"       {item['error']}")
+
 
 
 def _doc_export(
@@ -4515,6 +4774,7 @@ HANDLERS = {
     "index":       cmd_index,
     "update":      cmd_update,
     "summary":     cmd_summary,
+    "inventory":   cmd_inventory,
     "features":    cmd_features,
     "feature":     cmd_feature,
     "impacted":    cmd_impacted,
@@ -4524,8 +4784,10 @@ HANDLERS = {
     "callees":     cmd_callees,
     "touchpoints": cmd_touchpoints,
     "diff":        cmd_diff,
+    "graph":       cmd_graph,
     "report":         cmd_report,
     "global-report":  cmd_global_report,
+    "compact":        cmd_compact,
     "serve":          cmd_serve,
     "doc":            cmd_doc,
     "mem":            cmd_mem,
