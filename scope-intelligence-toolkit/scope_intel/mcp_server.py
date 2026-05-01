@@ -380,9 +380,10 @@ TOOLS: list[dict] = [
     {
         "name": "doc_search",
         "description": (
-            "Search all .ai-context/ files for a keyword or phrase (case-insensitive). "
-            "Returns matching lines with surrounding context. Useful for finding "
-            "which generated context file contains information about a specific topic."
+            "Search all .ai-context/ files for a keyword, phrase, or regex pattern "
+            "(case-insensitive). Returns matching lines with surrounding context. "
+            "Useful for finding which generated context file contains information "
+            "about a specific topic."
         ),
         "inputSchema": {
             "type": "object",
@@ -390,7 +391,7 @@ TOOLS: list[dict] = [
                 **_REPO_PROP,
                 "query": {
                     "type": "string",
-                    "description": "Keyword or phrase to search for.",
+                    "description": "Keyword, phrase, or regex pattern to search for.",
                 },
                 "layer": {
                     "type": "string",
@@ -402,6 +403,11 @@ TOOLS: list[dict] = [
                     "type": "integer",
                     "default": 2,
                     "description": "Lines of context around each match (default: 2).",
+                },
+                "use_regex": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Treat query as a regex pattern (default: false = literal).",
                 },
             },
             "required": ["query"],
@@ -756,10 +762,15 @@ def _call_tool(name: str, arguments: dict) -> dict:
         query = arguments["query"]
         layer = arguments.get("layer", "all")
         context_lines = int(arguments.get("context", 2))
+        use_regex = arguments.get("use_regex", False)
         ai_ctx = repo / ".ai-context"
         if not ai_ctx.exists():
             return {"error": "no .ai-context/ found — run doc_ingest first"}
-        pattern = _re.compile(_re.escape(query), _re.IGNORECASE)
+        try:
+            raw_pat = query if use_regex else _re.escape(query)
+            pattern = _re.compile(raw_pat, _re.IGNORECASE)
+        except _re.error as exc:
+            return {"error": f"invalid regex: {exc}"}
         results = []
         def _search(directory: Path, lyr: str) -> None:
             if not directory.exists(): return

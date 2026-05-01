@@ -356,6 +356,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--context", type=int, default=2, metavar="N",
         help="Lines of context around each match (default: 2).",
     )
+    p_search.add_argument(
+        "--regex", action="store_true",
+        help="Treat query as a regex pattern instead of a literal string.",
+    )
     p_search.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # mem — MemPalace long-term memory
@@ -1609,8 +1613,8 @@ def _doc_fetch(repo: Path, name: str) -> dict:
 
 
 def _doc_search(repo: Path, query: str, *, layer: str = "all",
-                context_lines: int = 2) -> dict:
-    """Search all .ai-context/ files for a keyword (case-insensitive).
+                context_lines: int = 2, use_regex: bool = False) -> dict:
+    """Search all .ai-context/ files for a keyword or regex (case-insensitive).
 
     Returns a list of matches: {file_id, path, layer, matches[]}.
     Each match has {line_no, line, context_before[], context_after[]}.
@@ -1620,7 +1624,11 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
         return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
 
     import re as _re
-    pattern = _re.compile(_re.escape(query), _re.IGNORECASE)
+    try:
+        raw_pattern = query if use_regex else _re.escape(query)
+        pattern = _re.compile(raw_pattern, _re.IGNORECASE)
+    except _re.error as exc:
+        return {"error": f"invalid regex pattern: {exc}"}
     results: list[dict] = []
 
     def _search_dir(directory: Path, lyr: str) -> None:
@@ -1660,6 +1668,7 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
     total_matches = sum(r["match_count"] for r in results)
     return {
         "query":         query,
+        "use_regex":     use_regex,
         "files_searched": (
             len(list((ai_ctx / "generated").glob("*.md")) if (ai_ctx / "generated").exists() else [])
             + len(list((ai_ctx / "curated").glob("*.md")) if (ai_ctx / "curated").exists() else [])
@@ -1673,7 +1682,8 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
 def _fmt_doc_search(r: dict) -> None:
     if "error" in r:
         print(r["error"]); return
-    print(f"search: '{r['query']}'  —  {r['total_matches']} match(es) "
+    mode_tag = "  [regex]" if r.get("use_regex") else ""
+    print(f"search: '{r['query']}'{mode_tag}  —  {r['total_matches']} match(es) "
           f"in {r['files_with_matches']}/{r['files_searched']} files")
     for res in r["results"]:
         print(f"\n{'─'*60}")
@@ -2049,7 +2059,8 @@ def cmd_doc(args) -> int:
     if args.doc_cmd == "search":
         repo = _resolve_repo(args.repo)
         result = _doc_search(repo, args.query,
-                             layer=args.layer, context_lines=args.context)
+                             layer=args.layer, context_lines=args.context,
+                             use_regex=getattr(args, "regex", False))
         _emit(result, args.json, formatter=_fmt_doc_search)
         return 0 if "error" not in result else 2
 

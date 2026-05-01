@@ -825,6 +825,28 @@ class TestDocSearch:
         manual_total = sum(r["match_count"] for r in result["results"])
         assert result["total_matches"] == manual_total
 
+    def test_search_regex_finds_pattern(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        # Regex: match "Redis" or "cache" or "memory"
+        result = _doc_search(repo, r"Redis|cache|memory", use_regex=True)
+        assert "error" not in result
+        assert result.get("use_regex") is True
+        assert result["total_matches"] > 0
+
+    def test_search_invalid_regex_returns_error(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_search(repo, r"[invalid(", use_regex=True)
+        assert "error" in result
+
+    def test_search_literal_vs_regex_differ_for_special_chars(self, repo, md_file):
+        ingest_document(repo, md_file, overwrite=True)
+        # Literal search for "scope.doc" matches the substring literally
+        r_lit = _doc_search(repo, "scope.doc", use_regex=False)
+        # Regex "scope.doc" treats '.' as any char — may match more
+        r_rx  = _doc_search(repo, "scope.doc", use_regex=True)
+        # Regex can't match fewer than literal (since '.' is a superset)
+        assert r_rx["total_matches"] >= r_lit["total_matches"]
+
 
 # ---------------------------------------------------------------------------
 # doc stats helper
