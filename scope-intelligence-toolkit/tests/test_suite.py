@@ -476,6 +476,99 @@ class TestMemPalaceFetch:
         assert total >= 2
 
 
+class TestMemPalaceConfidenceDecay:
+    """Phase 6.1 — non-destructive effective_confidence at fetch time."""
+
+    def _backdate(self, repo, mem_id: str, days: int) -> None:
+        """Rewrite ts on a memory entry to N days ago (for testing decay only)."""
+        import datetime
+        entries = store.read_mempalace(repo)
+        new_ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        new_ts_str = new_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+        for e in entries:
+            if e.get("id") == mem_id:
+                e["ts"] = new_ts_str
+        # rewrite the JSONL
+        path = store.mempalace_path(repo) if hasattr(store, "mempalace_path") else \
+               (repo / ".scope-intelligence" / "mempalace.jsonl")
+        path.write_text(
+            "\n".join(json.dumps(e) for e in entries) + "\n",
+            encoding="utf-8",
+        )
+
+    def test_effective_confidence_present_on_semantic(self, repo):
+        add_memory(repo, "semantic", "fresh fact", confidence=0.9, features=["auth"])
+        r = fetch_relevant(repo, feature="auth")
+        sem = r["layers"]["semantic"]
+        assert len(sem) >= 1
+        assert "effective_confidence" in sem[0]
+
+    def test_fresh_entry_effective_equals_base(self, repo):
+        add_memory(repo, "semantic", "right now", confidence=0.8, features=["auth"])
+        r = fetch_relevant(repo, feature="auth")
+        sem = r["layers"]["semantic"][0]
+        # Newly-added: age ~ 0, decay factor ~ 1.0
+        assert abs(sem["effective_confidence"] - 0.8) < 0.01
+        # Stored confidence is unchanged
+        assert sem["confidence"] == 0.8
+
+    def test_old_entry_effective_below_base(self, repo):
+        e = add_memory(repo, "semantic", "ancient fact",
+                       confidence=0.9, features=["auth"])
+        # Push timestamp 180 days back — with default 90d half-life, factor = 0.25
+        self._backdate(repo, e["id"], days=180)
+        r = fetch_relevant(repo, feature="auth")
+        sem = next(x for x in r["layers"]["semantic"] if x["id"] == e["id"])
+        # Stored value is untouched...
+        assert sem["confidence"] == 0.9
+        # ...but effective is decayed
+        assert sem["effective_confidence"] < 0.5
+        assert sem["effective_confidence"] > 0.0
+
+    def test_sort_order_uses_effective_confidence(self, repo):
+        """A high base confidence that's decayed should rank below a fresh lower one."""
+        old = add_memory(repo, "semantic", "old high",
+                         confidence=0.95, features=["auth"])
+        add_memory(repo, "semantic", "fresh moderate",
+                   confidence=0.6, features=["auth"])
+        # Decay the old one severely (5 half-lives back ~ 99% loss)
+        self._backdate(repo, old["id"], days=450)
+        r = fetch_relevant(repo, feature="auth")
+        sem = r["layers"]["semantic"]
+        notes = [s["note"] for s in sem]
+        assert notes[0] == "fresh moderate", notes
+
+    def test_per_entry_half_life_override(self, repo):
+        """A short half-life makes the effective drop faster than the default."""
+        e = add_memory(repo, "semantic", "expires fast",
+                       confidence=0.9, features=["auth"], half_life_days=30)
+        # 60 days = 2 half-lives → effective ~ 0.225
+        self._backdate(repo, e["id"], days=60)
+        r = fetch_relevant(repo, feature="auth")
+        sem = next(x for x in r["layers"]["semantic"] if x["id"] == e["id"])
+        assert sem["confidence"] == 0.9
+        assert 0.15 < sem["effective_confidence"] < 0.30
+
+    def test_config_half_life_used_when_no_override(self, repo):
+        """Setting config.semantic_half_life affects every entry without an override."""
+        cfg = store.read_json(repo, "config", store.default_config())
+        cfg["semantic_half_life"] = 30  # aggressive decay repo-wide
+        store.write_json(repo, "config", cfg)
+
+        e = add_memory(repo, "semantic", "uses config decay",
+                       confidence=0.9, features=["auth"])
+        self._backdate(repo, e["id"], days=60)  # 2 half-lives at 30
+        r = fetch_relevant(repo, feature="auth")
+        sem = next(x for x in r["layers"]["semantic"] if x["id"] == e["id"])
+        assert sem["effective_confidence"] < 0.30
+
+    def test_entry_without_ts_keeps_base(self, repo):
+        """Defensive: malformed entries shouldn't blow up fetch."""
+        from scope_intel.core.mempalace import _effective_confidence
+        eff = _effective_confidence({"confidence": 0.7, "ts": "not-a-date"})
+        assert eff == 0.7
+
+
 class TestMemPalaceList:
     def test_list_all(self, repo):
         add_memory(repo, "bug", "b1", features=["auth"])

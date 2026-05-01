@@ -673,6 +673,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Mark this entry as already resolved.")
     p_madd.add_argument("--confidence", type=float, default=1.0,
                         help="Confidence 0.0-1.0 for semantic facts (default: 1.0).")
+    p_madd.add_argument(
+        "--half-life", type=int, default=None, dest="half_life_days",
+        metavar="DAYS",
+        help=("Days for the effective_confidence to halve (semantic only). "
+              "Overrides config.semantic_half_life (default 90)."),
+    )
     p_madd.add_argument("--step", action="append", dest="steps", default=[],
                         metavar="STEP",
                         help="One step for a procedure memory. Repeat flag for each step.")
@@ -4122,6 +4128,7 @@ def cmd_mem(args) -> int:
             author=args.author,
             resolved=args.resolved,
             confidence=args.confidence,
+            half_life_days=getattr(args, "half_life_days", None),
             steps=args.steps or None,
         )
         if "error" in result:

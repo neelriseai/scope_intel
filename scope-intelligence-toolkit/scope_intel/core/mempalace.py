@@ -80,6 +80,7 @@ def add_memory(
     resolved: bool = False,
     # semantic-only
     confidence: float = 1.0,
+    half_life_days: Optional[int] = None,
     # procedure-only
     steps: Optional[list] = None,
 ) -> dict:
@@ -110,6 +111,8 @@ def add_memory(
     }
     if kind == "semantic":
         entry["confidence"] = round(float(confidence), 2)
+        if half_life_days is not None and int(half_life_days) > 0:
+            entry["half_life_days"] = int(half_life_days)
     if kind == "procedure":
         entry["steps"] = list(steps or [])
 
@@ -158,6 +161,42 @@ def _structural_slice(
         "files":    file_details,
         "symbols":  sorted(scope_symbols),
     }
+
+
+def _effective_confidence(entry: dict, default_half_life: int = 90) -> float:
+    """Compute decayed confidence for a semantic entry without mutating it.
+
+    Non-destructive: stored `confidence` is left alone. Effective value is
+    derived at fetch time so reinforcement (`scope mem touch`) and config
+    changes take effect immediately.
+
+    formula: base * 0.5^(age_days / half_life)
+    """
+    base = float(entry.get("confidence", 1.0))
+    half_life = int(entry.get("half_life_days") or default_half_life)
+    if half_life <= 0:
+        return base
+
+    ts_str = entry.get("ts", "")
+    try:
+        import datetime
+        ts_dt = datetime.datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%SZ")
+        ts_dt = ts_dt.replace(tzinfo=datetime.timezone.utc)
+        age_days = max(0.0, (time.time() - ts_dt.timestamp()) / 86400.0)
+    except (ValueError, TypeError):
+        return base
+
+    return round(base * (0.5 ** (age_days / half_life)), 4)
+
+
+def _config_half_life(repo_root: Path) -> int:
+    """Read semantic_half_life from config, defaulting to 90 days."""
+    cfg = store.read_json(repo_root, "config", {})
+    try:
+        val = int(cfg.get("semantic_half_life", 90))
+        return val if val > 0 else 90
+    except (TypeError, ValueError):
+        return 90
 
 
 def fetch_relevant(
@@ -263,8 +302,17 @@ def fetch_relevant(
         else:
             episodic_matches.append(e)
 
-    # semantic: highest confidence first (timeless facts don't age)
-    semantic_matches.sort(key=lambda x: -x.get("confidence", 1.0))
+    # semantic: highest effective_confidence first (Phase 6.1 — exponential decay
+    # applied at fetch time, original `confidence` is never overwritten).
+    half_life = _config_half_life(repo_root)
+    decayed: list = []
+    for e in semantic_matches:
+        eff = _effective_confidence(e, default_half_life=half_life)
+        decayed_entry = dict(e)
+        decayed_entry["effective_confidence"] = eff
+        decayed.append(decayed_entry)
+    decayed.sort(key=lambda x: -x["effective_confidence"])
+    semantic_matches = decayed
 
     # procedure: most recently updated first
     procedure_matches.sort(key=lambda x: x.get("ts", ""), reverse=True)
