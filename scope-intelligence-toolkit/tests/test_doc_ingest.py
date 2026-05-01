@@ -1114,6 +1114,40 @@ class TestDocExport:
         result = _doc_export(repo)
         assert result["total_files"] == len(result["files"])
 
+    def test_export_tag_filter_includes_only_tagged(self, repo, md_file):
+        from scope_intel.cli import _doc_export, _doc_tag, _doc_list
+        ingest_document(repo, md_file, overwrite=True)
+        # Pick the first generated file and tag it.
+        listing = _doc_list(repo)
+        first_id = listing["generated"][0]["id"]
+        _doc_tag(repo, first_id, add_tags=["important"])
+
+        result = _doc_export(repo, tag_filter="important")
+        assert "error" not in result, result
+        assert result["total_files"] == 1
+        assert result["files"][0]["id"] == first_id
+
+    def test_export_tag_filter_no_match_returns_error(self, repo, md_file):
+        from scope_intel.cli import _doc_export
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_export(repo, tag_filter="never-applied-tag")
+        assert "error" in result
+        assert "never-applied-tag" in result["error"]
+
+    def test_export_tag_filter_curated(self, repo, md_file):
+        """Tag filter should also pick up tags on curated files."""
+        from scope_intel.cli import _doc_export, _doc_tag
+        ingest_document(repo, md_file, overwrite=True)
+        cur_dir = repo / ".ai-context" / "curated"
+        cur_dir.mkdir(parents=True, exist_ok=True)
+        (cur_dir / "manual-notes.md").write_text("# Notes\n", encoding="utf-8")
+        _doc_tag(repo, "manual-notes", add_tags=["curated-only"])
+
+        result = _doc_export(repo, tag_filter="curated-only")
+        assert "error" not in result, result
+        assert result["total_files"] == 1
+        assert result["files"][0]["layer"] == "curated"
+
 
 # ---------------------------------------------------------------------------
 # doc check — health validation

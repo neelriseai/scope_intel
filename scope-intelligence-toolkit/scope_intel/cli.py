@@ -438,6 +438,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-header", action="store_true",
         help="Omit the export header comment.",
     )
+    p_export.add_argument(
+        "--tag", default=None, metavar="TAG",
+        help="Only include files carrying this tag (set via `scope doc tag`).",
+    )
     p_export.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc validate — check .ai-context/ integrity
@@ -3143,8 +3147,11 @@ def _doc_export(
     *,
     layer: str = "all",
     include_header: bool = True,
+    tag_filter: str | None = None,
 ) -> dict:
     """Concatenate all .ai-context/ files into a single text blob.
+
+    If tag_filter is set, only files carrying that tag are included.
 
     Returns:
         {content, total_files, total_chars, total_tokens, source, files[]}
@@ -3156,11 +3163,16 @@ def _doc_export(
     # Discover source doc name from index.json if available
     index_path = ai_ctx / "generated" / "index.json"
     source = "unknown"
+    index_files_: list[dict] = []
     if index_path.exists():
         try:
-            source = json.loads(index_path.read_text(encoding="utf-8")).get("source", "unknown")
+            idx_data = json.loads(index_path.read_text(encoding="utf-8"))
+            source = idx_data.get("source", "unknown")
+            index_files_ = idx_data.get("files", [])
         except Exception:  # noqa: BLE001
             pass
+
+    ann_data_ = _load_annotations(repo) if tag_filter else {}
 
     dirs: list[tuple[Path, str]] = []
     if layer in ("generated", "all"):
@@ -3178,6 +3190,10 @@ def _doc_export(
             except OSError:
                 continue
             rel = str(p.relative_to(repo)).replace("\\", "/")
+            if tag_filter:
+                tags = _get_file_tags(repo, rel, lyr, index_files_, ann_data_)
+                if tag_filter not in tags:
+                    continue
             sections.append({
                 "id":    p.stem,
                 "path":  rel,
@@ -3187,6 +3203,8 @@ def _doc_export(
             })
 
     if not sections:
+        if tag_filter:
+            return {"error": f"no .ai-context/ files carry tag '{tag_filter}'"}
         return {"error": "no .ai-context/ files found — run `scope doc ingest` first"}
 
     import time as _time
@@ -3588,7 +3606,12 @@ def cmd_doc(args) -> int:
 
     if args.doc_cmd == "export":
         repo = _resolve_repo(args.repo)
-        result = _doc_export(repo, layer=args.layer, include_header=not args.no_header)
+        result = _doc_export(
+            repo,
+            layer=args.layer,
+            include_header=not args.no_header,
+            tag_filter=args.tag,
+        )
         if "error" in result:
             if args.json:
                 print(json.dumps(result, indent=2))
