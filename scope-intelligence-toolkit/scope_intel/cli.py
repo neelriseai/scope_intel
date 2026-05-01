@@ -468,6 +468,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_copy.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
     p_copy.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc touch — one-shot 'needs review' annotation wrapper
+    p_touch = doc_sub.add_parser(
+        "touch",
+        help="Flag a .ai-context/ file as needing review (shorthand for `annotate --add 'needs review'`).",
+    )
+    p_touch.add_argument("name", help="File id or partial name to flag.")
+    p_touch.add_argument(
+        "--reason", default="",
+        help="Optional reason appended to the annotation (e.g. 'stale schema').",
+    )
+    p_touch.add_argument("--author", default="", help="Author name to record on the annotation.")
+    p_touch.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_touch.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc snapshot — named point-in-time checkpoints of .ai-context/ file hashes
     p_snap = doc_sub.add_parser(
         "snapshot",
@@ -3381,6 +3395,23 @@ def _doc_rename(repo: Path, old_name: str, new_name: str) -> dict:
     }
 
 
+def _doc_touch(
+    repo: Path,
+    name: str,
+    *,
+    reason: str = "",
+    author: str = "",
+) -> dict:
+    """One-shot 'needs review' annotation wrapper.
+
+    Quick way to flag a curated/generated file for follow-up without writing a
+    full annotate command. The note text is fixed to "needs review[: <reason>]"
+    so reviewers can grep for it consistently.
+    """
+    note = f"needs review: {reason}" if reason else "needs review"
+    return _doc_annotate(repo, name, add_note=note, author=author)
+
+
 def _doc_copy(repo: Path, source_name: str, new_name: str) -> dict:
     """Duplicate a curated .ai-context/ file under a new name (annotations not copied).
 
@@ -3865,6 +3896,12 @@ def cmd_doc(args) -> int:
             print(result["error"], file=sys.stderr)
         else:
             print(f"copied: {result['source_path']}  →  {result['new_path']}")
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "touch":
+        repo = _resolve_repo(args.repo)
+        result = _doc_touch(repo, args.name, reason=args.reason, author=args.author)
+        _emit(result, args.json, formatter=_fmt_doc_annotate)
         return 0 if "error" not in result else 2
 
     print(f"unknown doc subcommand: {args.doc_cmd}", file=sys.stderr)

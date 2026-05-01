@@ -2413,3 +2413,50 @@ class TestDocCopy:
         from scope_intel.cli import _doc_copy
         result = _doc_copy(repo, "anything", "new")
         assert "error" in result
+
+
+class TestDocTouch:
+    """Tests for _doc_touch — one-shot 'needs review' annotation wrapper."""
+
+    def _make_curated(self, repo, stem: str) -> Path:
+        cur_dir = repo / ".ai-context" / "curated"
+        cur_dir.mkdir(parents=True, exist_ok=True)
+        p = cur_dir / f"{stem}.md"
+        p.write_text("# Title\n", encoding="utf-8")
+        return p
+
+    def test_touch_adds_needs_review(self, repo):
+        from scope_intel.cli import _doc_touch
+        self._make_curated(repo, "design")
+        result = _doc_touch(repo, "design")
+        assert "error" not in result, result
+        assert result["action"] == "added"
+        assert result["annotations"][-1]["note"] == "needs review"
+
+    def test_touch_with_reason_appends(self, repo):
+        from scope_intel.cli import _doc_touch
+        self._make_curated(repo, "spec")
+        result = _doc_touch(repo, "spec", reason="schema is stale")
+        assert "error" not in result
+        assert result["annotations"][-1]["note"] == "needs review: schema is stale"
+
+    def test_touch_records_author(self, repo):
+        from scope_intel.cli import _doc_touch
+        self._make_curated(repo, "doc")
+        result = _doc_touch(repo, "doc", author="alice")
+        assert result["annotations"][-1]["author"] == "alice"
+
+    def test_touch_unknown_file_returns_error(self, repo):
+        from scope_intel.cli import _doc_touch
+        result = _doc_touch(repo, "nonexistent")
+        assert "error" in result
+
+    def test_touch_accumulates_with_existing_annotations(self, repo):
+        """A second touch leaves prior annotations intact and stacks."""
+        from scope_intel.cli import _doc_touch, _doc_annotate
+        self._make_curated(repo, "page")
+        _doc_annotate(repo, "page", add_note="initial thought")
+        result = _doc_touch(repo, "page", reason="needs follow-up")
+        notes = [a["note"] for a in result["annotations"]]
+        assert notes[0] == "initial thought"
+        assert notes[-1] == "needs review: needs follow-up"
