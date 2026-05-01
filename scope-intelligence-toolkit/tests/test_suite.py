@@ -38,6 +38,13 @@ from scope_intel.core.query_engine import (
 from scope_intel.core.tracker import compute_savings_summary, compute_global_summary, log_query
 from scope_intel.core.reporter import format_terminal, format_html, format_global_terminal, format_global_html
 from scope_intel.core.diff import compute_diff_scope
+from scope_intel.core.compact_context import (
+    build_compact_artifacts,
+    compact_stats,
+    decompress_compact_file,
+    get_inventory,
+    validate_compact_artifacts,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +319,8 @@ class TestMCPServer:
         r = json.loads(out)
         names = [t["name"] for t in r["result"]["tools"]]
         assert "scope_summary" in names
+        assert "scope_inventory" in names
+        assert "compact_build" in names
         assert "mem_add" in names
         assert "mem_fetch" in names
 
@@ -1353,3 +1362,122 @@ class TestGraphRenderer:
         assert isinstance(r["nodes"], int) and r["nodes"] > 0
         assert isinstance(r["edges"], int)
         assert isinstance(r["truncated"], bool)
+
+
+# ===========================================================================
+# Compact context sidecars and inventory
+# ===========================================================================
+
+class TestCompactContext:
+    def test_build_ai_context_sidecar_keeps_original(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        original = "# Overview\n\nThe system is responsible for indexing repositories.\n"
+        source = gen / "overview.md"
+        source.write_text(original, encoding="utf-8")
+
+        result = build_compact_artifacts(repo, target="ai-context")
+
+        assert result["total_written"] == 1
+        assert source.read_text(encoding="utf-8") == original
+        compact_rel = result["written"][0]["compact"]
+        assert (repo / compact_rel).exists()
+        assert result["source_tokens_est"] > 0
+        assert result["dsl_tokens_est"] > 0
+
+    def test_validate_ai_context_sidecar_round_trips_exact_text(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        original = "# Contract\n\nMust always validate payloads before persist.\n"
+        (gen / "contract.md").write_text(original, encoding="utf-8")
+        build_compact_artifacts(repo, target="ai-context")
+
+        result = validate_compact_artifacts(repo, target="ai-context")
+
+        assert result["ok"] is True
+        assert result["failed"] == 0
+
+    def test_validate_fails_when_source_changes_after_compact(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        source = gen / "roadmap.md"
+        source.write_text("# Roadmap\n\nPhase 1 complete.\n", encoding="utf-8")
+        build_compact_artifacts(repo, target="ai-context")
+        source.write_text("# Roadmap\n\nPhase 2 changed.\n", encoding="utf-8")
+
+        result = validate_compact_artifacts(repo, target="ai-context")
+
+        assert result["ok"] is False
+        assert result["failed"] == 1
+
+    def test_decompress_compact_file_returns_original_payload(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        original = "# Memory\n\nRedis cache ttl 24h.\n"
+        source = gen / "memory.md"
+        source.write_text(original, encoding="utf-8")
+        built = build_compact_artifacts(repo, target="ai-context")
+
+        result = decompress_compact_file(repo / built["written"][0]["compact"])
+
+        assert result["content"] == original
+        assert result["meta"]["source"].endswith("memory.md")
+
+    def test_build_skill_sidecar(self, repo):
+        skill_dir = repo / ".agents" / "skills" / "sample"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "# Skill\n\nUse this skill when debugging authentication issues.\n",
+            encoding="utf-8",
+        )
+
+        result = build_compact_artifacts(repo, target="skills")
+
+        assert result["total_written"] == 1
+        assert result["written"][0]["kind"] == "skill"
+        assert validate_compact_artifacts(repo, target="skills")["ok"] is True
+
+    def test_build_memory_sidecar(self, repo):
+        add_memory(repo, "semantic", "auth uses JWT signing", confidence=0.9)
+
+        result = build_compact_artifacts(repo, target="memory")
+
+        assert result["total_written"] == 1
+        assert result["written"][0]["kind"] == "memory"
+        assert validate_compact_artifacts(repo, target="memory")["ok"] is True
+
+    def test_compact_stats_aggregates_sidecars(self, repo):
+        gen = repo / ".ai-context" / "generated"
+        gen.mkdir(parents=True)
+        (gen / "overview.md").write_text("# Overview\n\nUseful context.\n", encoding="utf-8")
+        build_compact_artifacts(repo, target="ai-context")
+
+        result = compact_stats(repo, target="ai-context")
+
+        assert result["total"] == 1
+        assert result["source_tokens_est"] > 0
+        assert result["dsl_tokens_est"] > 0
+
+
+class TestInventory:
+    def test_inventory_lists_files_without_source_scan(self, repo):
+        result = get_inventory(repo, include_symbols=False)
+
+        assert "error" not in result
+        assert result["totals"]["files"] >= 3
+        assert "symbols" not in result
+        assert any(f["file"] == "src/auth/login.py" for f in result["files"])
+
+    def test_inventory_lists_classes(self, class_repo):
+        result = get_inventory(class_repo)
+
+        assert result["totals"]["classes"] == 3
+        names = [c["name"] for c in result["classes"]]
+        assert {"Animal", "Dog", "Cat"}.issubset(set(names))
+
+    def test_inventory_feature_filter(self, repo):
+        result = get_inventory(repo, feature="auth")
+
+        assert "error" not in result
+        assert result["totals"]["files"] >= 1
+        assert all(f["feature"] == "auth" for f in result["files"])

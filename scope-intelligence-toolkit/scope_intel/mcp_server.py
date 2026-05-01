@@ -38,6 +38,12 @@ from .core.federation import (
     federation_link,
     federation_remove,
 )
+from .core.compact_context import (
+    build_compact_artifacts,
+    compact_stats,
+    get_inventory,
+    validate_compact_artifacts,
+)
 from .core.query_engine import (
     find_impacted_files,
     get_callees,
@@ -70,6 +76,18 @@ TOOLS: list[dict] = [
         "inputSchema": {
             "type": "object",
             "properties": _REPO_PROP,
+        },
+    },
+    {
+        "name": "scope_inventory",
+        "description": "Indexed files, classes, and symbols without reading source file bodies.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "feature": {"type": "string", "description": "Optional feature id filter."},
+                "include_symbols": {"type": "boolean", "default": True},
+            },
         },
     },
     {
@@ -191,6 +209,52 @@ TOOLS: list[dict] = [
         "inputSchema": {
             "type": "object",
             "properties": _REPO_PROP,
+        },
+    },
+    {
+        "name": "compact_build",
+        "description": "Build compact DSL sidecars for .ai-context files, skills, memory, or all.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "target": {
+                    "type": "string",
+                    "enum": ["ai-context", "skills", "memory", "all"],
+                    "default": "ai-context",
+                },
+                "overwrite": {"type": "boolean", "default": True},
+            },
+        },
+    },
+    {
+        "name": "compact_validate",
+        "description": "Decompress compact sidecars and verify exact payload against current originals.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "target": {
+                    "type": "string",
+                    "enum": ["ai-context", "skills", "memory", "all"],
+                    "default": "all",
+                },
+            },
+        },
+    },
+    {
+        "name": "compact_stats",
+        "description": "Token estimate summary for compact sidecars.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "target": {
+                    "type": "string",
+                    "enum": ["ai-context", "skills", "memory", "all"],
+                    "default": "all",
+                },
+            },
         },
     },
     # --- Phase 4: MemPalace tools ---
@@ -1001,6 +1065,12 @@ def _call_tool(name: str, arguments: dict) -> dict:
 
     if name == "scope_summary":
         return get_repo_summary(repo)
+    if name == "scope_inventory":
+        return get_inventory(
+            repo,
+            feature=arguments.get("feature"),
+            include_symbols=arguments.get("include_symbols", True),
+        )
     if name == "scope_features":
         from .core import store
         return store.read_json(repo, "features", {"features": []})
@@ -1036,6 +1106,22 @@ def _call_tool(name: str, arguments: dict) -> dict:
         return compute_diff_scope(repo, arguments.get("ref", "HEAD~1"))
     if name == "scope_report":
         return compute_savings_summary(repo)
+    if name == "compact_build":
+        return build_compact_artifacts(
+            repo,
+            target=arguments.get("target", "ai-context"),
+            overwrite=arguments.get("overwrite", True),
+        )
+    if name == "compact_validate":
+        return validate_compact_artifacts(
+            repo,
+            target=arguments.get("target", "all"),
+        )
+    if name == "compact_stats":
+        return compact_stats(
+            repo,
+            target=arguments.get("target", "all"),
+        )
     if name == "scope_graph":
         from .core.graph_renderer import render_graph
         return render_graph(
