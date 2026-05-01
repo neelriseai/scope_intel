@@ -621,6 +621,25 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_outline",
+        "description": (
+            "Return the heading hierarchy of a .ai-context/ file as a structured list. "
+            "Each entry includes heading level (1-6), text, line number, and char offset. "
+            "Useful for navigating large generated docs before calling doc_section."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "name": {
+                    "type": "string",
+                    "description": "File id or partial name (e.g. 'roadmap', '003', 'constraints').",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
         "name": "doc_annotate",
         "description": (
             "Add, view, or clear human annotations on a .ai-context/ file. "
@@ -1123,6 +1142,10 @@ def _call_tool(name: str, arguments: dict) -> dict:
     if name == "doc_section":
         from .cli import _doc_fetch_section
         return _doc_fetch_section(repo, arguments["name"], arguments["heading"])
+
+    if name == "doc_outline":
+        from .cli import _doc_outline
+        return _doc_outline(repo, arguments["name"])
 
     if name == "doc_annotate":
         from .cli import _doc_annotate

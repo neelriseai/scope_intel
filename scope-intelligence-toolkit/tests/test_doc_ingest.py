@@ -2064,3 +2064,136 @@ class TestDocTag:
         for f in other_gen:
             other_tags = _get_file_tags(repo, f["path"], "generated", index_files, ann_data)
             assert "my-special-tag" not in other_tags
+
+
+# ---------------------------------------------------------------------------
+# TestDocOutline
+# ---------------------------------------------------------------------------
+
+class TestDocOutline:
+    """Tests for _doc_outline — heading hierarchy extraction from a .ai-context/ file."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def _first_generated_id(self, repo):
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        files = [f for f in idx["files"] if f["layer"] == "generated"]
+        assert files
+        return files[0]["id"]
+
+    def test_outline_keys_present(self, repo, md_file):
+        from scope_intel.cli import _doc_outline
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        result = _doc_outline(repo, fid)
+        assert "error" not in result, result
+        for key in ("id", "path", "title", "layer", "headings", "total_headings", "chars"):
+            assert key in result, f"missing key: {key}"
+
+    def test_outline_headings_is_list(self, repo, md_file):
+        from scope_intel.cli import _doc_outline
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        result = _doc_outline(repo, fid)
+        assert isinstance(result["headings"], list)
+
+    def test_outline_heading_entry_keys(self, repo, md_file):
+        from scope_intel.cli import _doc_outline
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        result = _doc_outline(repo, fid)
+        assert result["total_headings"] > 0, "expected at least one heading in generated file"
+        h = result["headings"][0]
+        for key in ("level", "text", "line_no", "char_offset"):
+            assert key in h, f"heading entry missing key: {key}"
+
+    def test_outline_heading_levels_valid(self, repo, md_file):
+        from scope_intel.cli import _doc_outline
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        result = _doc_outline(repo, fid)
+        for h in result["headings"]:
+            assert 1 <= h["level"] <= 6, f"invalid heading level: {h['level']}"
+
+    def test_outline_line_numbers_positive(self, repo, md_file):
+        from scope_intel.cli import _doc_outline
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        result = _doc_outline(repo, fid)
+        for h in result["headings"]:
+            assert h["line_no"] >= 1, f"line_no must be >= 1, got {h['line_no']}"
+            assert h["char_offset"] >= 0
+
+    def test_outline_unknown_file_returns_error(self, repo, md_file):
+        from scope_intel.cli import _doc_outline
+        self._ingest(repo, md_file)
+        result = _doc_outline(repo, "xyzzy-no-such-file-at-all")
+        assert "error" in result
+
+    def test_outline_total_headings_matches_list(self, repo, md_file):
+        from scope_intel.cli import _doc_outline
+        self._ingest(repo, md_file)
+        fid = self._first_generated_id(repo)
+        result = _doc_outline(repo, fid)
+        assert result["total_headings"] == len(result["headings"])
+
+
+# ---------------------------------------------------------------------------
+# TestDocSearchTag
+# ---------------------------------------------------------------------------
+
+class TestDocSearchTag:
+    """Tests for _doc_search with tag_filter parameter."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def _first_generated_id_and_path(self, repo):
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        files = [f for f in idx["files"] if f["layer"] == "generated"]
+        assert files
+        return files[0]["id"], files[0]["path"]
+
+    def test_search_tag_filter_key_in_result(self, repo, md_file):
+        """Result dict always carries tag_filter back to caller."""
+        self._ingest(repo, md_file)
+        result = _doc_search(repo, "overview", tag_filter="mytag")
+        assert "tag_filter" in result
+        assert result["tag_filter"] == "mytag"
+
+    def test_search_tag_filter_no_tagged_files_returns_empty(self, repo, md_file):
+        """When no file has the tag, search returns 0 matches regardless of query."""
+        self._ingest(repo, md_file)
+        result = _doc_search(repo, "Auto-generated", tag_filter="unassigned-tag-xyz")
+        assert "error" not in result
+        assert result["total_matches"] == 0
+
+    def test_search_tag_filter_restricts_to_tagged_files(self, repo, md_file):
+        """Only files with the given tag are searched; untagged files are excluded."""
+        from scope_intel.cli import _doc_tag
+        self._ingest(repo, md_file)
+        fid, _ = self._first_generated_id_and_path(repo)
+        # Tag a specific file with a unique label
+        _doc_tag(repo, fid, add_tags=["search-scope-test"])
+        # "Auto-generated" appears in generated files (footer)
+        r_filtered = _doc_search(repo, "Auto-generated", tag_filter="search-scope-test")
+        r_all = _doc_search(repo, "Auto-generated")
+        # Filtered search must have ≤ matches than unfiltered
+        assert r_filtered["files_searched"] <= r_all["files_searched"]
+        # The tag filter value is propagated
+        assert r_filtered["tag_filter"] == "search-scope-test"
+
+    def test_search_tag_filter_files_searched_count(self, repo, md_file):
+        """files_searched reflects the filtered-down set, not total candidate count."""
+        from scope_intel.cli import _doc_tag
+        self._ingest(repo, md_file)
+        fid, _ = self._first_generated_id_and_path(repo)
+        _doc_tag(repo, fid, add_tags=["count-test"])
+        result = _doc_search(repo, "anything", tag_filter="count-test")
+        # Only 1 file tagged — files_searched should be 1
+        assert result["files_searched"] == 1

@@ -464,6 +464,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_snap_del.add_argument("--repo", default=".")
     p_snap_del.add_argument("--json", action="store_true")
 
+    # doc outline — show the heading hierarchy of a generated file
+    p_outline = doc_sub.add_parser(
+        "outline",
+        help=(
+            "Show the heading hierarchy of a .ai-context/ file. "
+            "Useful for understanding what a long generated doc covers without printing everything."
+        ),
+    )
+    p_outline.add_argument(
+        "name",
+        help="File id or partial name (e.g. 'roadmap', '001', 'constraints').",
+    )
+    p_outline.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_outline.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc tag — attach free-form labels to a .ai-context/ file entry
     p_tag = doc_sub.add_parser(
         "tag",
@@ -547,6 +562,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument(
         "--regex", action="store_true",
         help="Treat query as a regex pattern instead of a literal string.",
+    )
+    p_search.add_argument(
+        "--tag", metavar="TAG",
+        help="Restrict search to files with this tag.",
     )
     p_search.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
@@ -2757,8 +2776,11 @@ def _doc_fetch(repo: Path, name: str) -> dict:
 
 
 def _doc_search(repo: Path, query: str, *, layer: str = "all",
-                context_lines: int = 2, use_regex: bool = False) -> dict:
+                context_lines: int = 2, use_regex: bool = False,
+                tag_filter: str | None = None) -> dict:
     """Search all .ai-context/ files for a keyword or regex (case-insensitive).
+
+    If tag_filter is set, only files that have the given tag are searched.
 
     Returns a list of matches: {file_id, path, layer, matches[]}.
     Each match has {line_no, line, context_before[], context_after[]}.
@@ -2775,11 +2797,35 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
         return {"error": f"invalid regex pattern: {exc}"}
     results: list[dict] = []
 
+    # Build tag-aware allowed-paths set if tag_filter is set
+    allowed_paths: set[str] | None = None
+    if tag_filter:
+        index_files_: list[dict] = []
+        idx_p = ai_ctx / "generated" / "index.json"
+        if idx_p.exists():
+            try:
+                index_files_ = json.loads(idx_p.read_text(encoding="utf-8")).get("files", [])
+            except Exception:  # noqa: BLE001
+                pass
+        ann_data_ = _load_annotations(repo)
+        allowed_paths = set()
+        for directory, lyr in [(ai_ctx / "generated", "generated"),
+                                (ai_ctx / "curated",   "curated")]:
+            if not directory.exists():
+                continue
+            for p in directory.glob("*.md"):
+                rel = str(p.relative_to(repo)).replace("\\", "/")
+                tags = _get_file_tags(repo, rel, lyr, index_files_, ann_data_)
+                if tag_filter in tags:
+                    allowed_paths.add(rel)
+
     def _search_dir(directory: Path, lyr: str) -> None:
         if not directory.exists():
             return
         for p in sorted(directory.glob("*.md")):
             rel = str(p.relative_to(repo)).replace("\\", "/")
+            if allowed_paths is not None and rel not in allowed_paths:
+                continue  # tag filter excludes this file
             try:
                 lines = p.read_text(encoding="utf-8").splitlines()
             except OSError:
@@ -2810,13 +2856,15 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
         _search_dir(ai_ctx / "curated", "curated")
 
     total_matches = sum(r["match_count"] for r in results)
+    total_candidate_files = (
+        len(list((ai_ctx / "generated").glob("*.md")) if (ai_ctx / "generated").exists() else [])
+        + len(list((ai_ctx / "curated").glob("*.md")) if (ai_ctx / "curated").exists() else [])
+    )
     return {
         "query":         query,
         "use_regex":     use_regex,
-        "files_searched": (
-            len(list((ai_ctx / "generated").glob("*.md")) if (ai_ctx / "generated").exists() else [])
-            + len(list((ai_ctx / "curated").glob("*.md")) if (ai_ctx / "curated").exists() else [])
-        ),
+        "tag_filter":    tag_filter,
+        "files_searched": len(allowed_paths) if allowed_paths is not None else total_candidate_files,
         "files_with_matches": len(results),
         "total_matches": total_matches,
         "results":       results,
@@ -2895,6 +2943,59 @@ def _doc_fetch_section(repo: Path, name: str, heading: str) -> dict:
         "chars":     len(section_text),
         "full_chars": file_result["chars"],
     }
+
+
+def _doc_outline(repo: Path, name: str) -> dict:
+    """Return the heading hierarchy of a .ai-context/ file.
+
+    Returns:
+        {id, path, title, layer, headings[], total_headings, chars}
+    Each heading: {level, text, line_no, char_offset}
+    """
+    import re as _re
+    file_result = _doc_fetch(repo, name)
+    if "error" in file_result:
+        return file_result
+
+    content = file_result["content"]
+    headings: list[dict] = []
+    char_offset = 0
+    for line_no, line in enumerate(content.splitlines(), 1):
+        m = _re.match(r"^(#{1,6})\s+(.*)", line)
+        if m:
+            headings.append({
+                "level":       len(m.group(1)),
+                "text":        m.group(2).strip(),
+                "line_no":     line_no,
+                "char_offset": char_offset,
+            })
+        char_offset += len(line) + 1  # +1 for newline
+
+    return {
+        "id":             file_result["id"],
+        "path":           file_result["path"],
+        "title":          file_result["title"],
+        "layer":          file_result["layer"],
+        "headings":       headings,
+        "total_headings": len(headings),
+        "chars":          file_result["chars"],
+    }
+
+
+def _fmt_doc_outline(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    print(f"# {r['title']}  [{r['layer']}]  "
+          f"({r['total_headings']} headings  {r['chars']:,} chars)")
+    print(f"# path: {r['path']}")
+    print()
+    indent_map = {1: "", 2: "  ", 3: "    ", 4: "      ", 5: "        ", 6: "          "}
+    for h in r["headings"]:
+        indent = indent_map.get(h["level"], "            ")
+        marker = "#" * h["level"]
+        print(f"{indent}{marker} {h['text']}  (line {h['line_no']})")
+    if not r["headings"]:
+        print("  (no headings found)")
 
 
 def _fmt_doc_fetch(r: dict) -> None:
@@ -3302,7 +3403,8 @@ def cmd_doc(args) -> int:
         repo = _resolve_repo(args.repo)
         result = _doc_search(repo, args.query,
                              layer=args.layer, context_lines=args.context,
-                             use_regex=getattr(args, "regex", False))
+                             use_regex=getattr(args, "regex", False),
+                             tag_filter=getattr(args, "tag", None))
         _emit(result, args.json, formatter=_fmt_doc_search)
         return 0 if "error" not in result else 2
 
@@ -3316,6 +3418,12 @@ def cmd_doc(args) -> int:
             clear=getattr(args, "clear", False),
         )
         _emit(result, args.json, formatter=_fmt_doc_annotate)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "outline":
+        repo = _resolve_repo(args.repo)
+        result = _doc_outline(repo, args.name)
+        _emit(result, args.json, formatter=_fmt_doc_outline)
         return 0 if "error" not in result else 2
 
     if args.doc_cmd == "tag":
