@@ -112,10 +112,17 @@ class PythonAdapter(LanguageAdapter):
     def _walk_top(self, node, symbols: list, parent: Optional[str],
                   source_lines: Optional[list] = None) -> None:
         if isinstance(node, ast.ClassDef):
+            bases = []
+            for b in node.bases:
+                if isinstance(b, ast.Name):
+                    bases.append(b.id)
+                elif isinstance(b, ast.Attribute):
+                    bases.append(f"{b.attr}")
             sym = ParsedSymbol(
                 name=node.name, kind="class", line=node.lineno,
                 qualified_name=f"{parent}.{node.name}" if parent else node.name,
                 parent=parent,
+                bases=bases,
             )
             symbols.append(sym)
             for child in node.body:

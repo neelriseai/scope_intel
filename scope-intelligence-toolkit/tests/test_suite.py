@@ -1234,3 +1234,122 @@ class TestConflictDetection:
     def test_not_indexed_returns_error(self, tmp_path):
         r = detect_conflicts(tmp_path)
         assert "error" in r
+
+
+# ===========================================================================
+# Graph renderer
+# ===========================================================================
+
+@pytest.fixture()
+def class_repo(tmp_path):
+    """Repo with classes, inheritance, and a call edge for graph tests."""
+    (tmp_path / "models.py").write_text(
+        "class Animal:\n"
+        "    def speak(self): pass\n"
+        "    def move(self): pass\n\n"
+        "class Dog(Animal):\n"
+        "    def speak(self): self.move()\n"
+        "    def fetch(self): pass\n\n"
+        "class Cat(Animal):\n"
+        "    def speak(self): pass\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "runner.py").write_text(
+        "from models import Dog\n"
+        "def run():\n"
+        "    d = Dog()\n"
+        "    d.speak()\n",
+        encoding="utf-8",
+    )
+    store.ensure_index_dir(tmp_path)
+    store.write_json(tmp_path, "config", store.default_config())
+    build_index(tmp_path)
+    return tmp_path
+
+
+class TestGraphRenderer:
+    def test_class_diagram_mermaid_contains_class_names(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert "error" not in r, r.get("error")
+        assert r["format"] == "mermaid"
+        assert "classDiagram" in r["diagram"]
+        assert "Animal" in r["diagram"]
+        assert "Dog" in r["diagram"]
+        assert "Cat" in r["diagram"]
+
+    def test_class_diagram_lists_methods(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert "error" not in r
+        # methods should appear inside the class block
+        assert "speak" in r["diagram"]
+        assert "fetch" in r["diagram"]
+
+    def test_class_diagram_inheritance_edge(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert "error" not in r
+        # Mermaid inheritance: Child <|-- Parent (or reverse)
+        assert "<|--" in r["diagram"]
+
+    def test_class_diagram_dot_format(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py",
+                         kind="class", format="dot")
+        assert "error" not in r
+        assert r["format"] == "dot"
+        assert "digraph" in r["diagram"]
+        assert "Animal" in r["diagram"]
+
+    def test_deps_graph_mermaid(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="runner.py", kind="deps")
+        assert "error" not in r
+        assert "graph TD" in r["diagram"]
+        # runner.py should appear as a node
+        assert "runner" in r["diagram"].lower()
+
+    def test_call_graph_mermaid(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="symbol", query="speak", kind="calls")
+        assert "error" not in r
+        assert "graph LR" in r["diagram"]
+        assert "speak" in r["diagram"].lower()
+
+    def test_fenced_block_wraps_diagram(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert r["fenced"].startswith("```mermaid\n")
+        assert r["fenced"].endswith("\n```")
+
+    def test_unknown_kind_returns_error(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="unknown")  # type: ignore[arg-type]
+        assert "error" in r
+
+    def test_not_indexed_returns_error(self, tmp_path):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(tmp_path, target="file", query="x.py", kind="class")
+        assert "error" in r
+
+    def test_missing_file_returns_error(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="nonexistent.py", kind="class")
+        assert "error" in r
+
+    def test_bases_captured_in_index(self, class_repo):
+        """Regression: python_adapter must store bases so graph can draw inheritance."""
+        syms = store.read_json(class_repo, "symbols", {"symbols": []})["symbols"]
+        dog = next((s for s in syms if s["name"] == "Dog"), None)
+        assert dog is not None, "Dog class not indexed"
+        assert "Animal" in dog.get("bases", []), (
+            f"Dog.bases={dog.get('bases')} — inheritance not captured by adapter"
+        )
+
+    def test_node_and_edge_counts_returned(self, class_repo):
+        from scope_intel.core.graph_renderer import render_graph
+        r = render_graph(class_repo, target="file", query="models.py", kind="class")
+        assert isinstance(r["nodes"], int) and r["nodes"] > 0
+        assert isinstance(r["edges"], int)
+        assert isinstance(r["truncated"], bool)

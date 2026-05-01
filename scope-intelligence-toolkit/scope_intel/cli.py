@@ -150,6 +150,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("ref", nargs="?", default="HEAD~1",
                         help="Git ref to diff against (default: HEAD~1).")
 
+    # graph — Mermaid / DOT diagram of classes, deps, or call chains
+    p_graph = sub.add_parser("graph", help="Generate Mermaid or DOT diagram from the index.")
+    _add_common(p_graph)
+    p_graph.add_argument("query", help="Feature id, file path, or symbol name.")
+    p_graph.add_argument(
+        "--target", choices=["feature", "file", "symbol"], default="feature",
+        help="What 'query' refers to (default: feature).",
+    )
+    p_graph.add_argument(
+        "--kind", choices=["class", "deps", "calls"], default="class",
+        help=(
+            "class = classDiagram (classes + methods + inheritance);  "
+            "deps  = import dependency graph (file → file);  "
+            "calls = call graph (callers → symbol → callees)."
+        ),
+    )
+    p_graph.add_argument(
+        "--format", choices=["mermaid", "dot"], default="mermaid",
+        help="Output format (default: mermaid).",
+    )
+    p_graph.add_argument(
+        "--max-nodes", type=int, default=60, metavar="N",
+        help="Cap diagram at N nodes for readability (default: 60).",
+    )
+    p_graph.add_argument(
+        "--output", metavar="FILE",
+        help="Write diagram to FILE instead of stdout.",
+    )
+
     # report — token savings dashboard
     p_rep = sub.add_parser("report", help="Token savings report from past queries.")
     p_rep.add_argument("--repo", default=".")
@@ -1528,6 +1557,37 @@ def cmd_touchpoints(args) -> int:
         log_query(repo, "touchpoints",
                   {"type": args.type, "feature": args.feature, "file": args.file},
                   result_files, latency_ms=ms)
+    return 0
+
+
+def cmd_graph(args) -> int:
+    from .core.graph_renderer import render_graph
+    repo = _resolve_repo(args.repo)
+    if _not_indexed(repo): return 2
+    result = render_graph(
+        repo,
+        target=args.target,
+        query=args.query,
+        kind=args.kind,
+        format=args.format,
+        max_nodes=args.max_nodes,
+    )
+    if "error" in result:
+        print(f"error: {result['error']}", file=__import__("sys").stderr)
+        return 1
+    if args.json:
+        import json as _json
+        print(_json.dumps(result, indent=2))
+        return 0
+    diagram = result["fenced"]
+    if hasattr(args, "output") and args.output:
+        Path(args.output).write_text(diagram, encoding="utf-8")
+        print(f"diagram written to {args.output}  "
+              f"({result['nodes']} nodes, {result['edges']} edges)")
+    else:
+        print(diagram)
+        print(f"\n# {result['nodes']} nodes  {result['edges']} edges"
+              + ("  (truncated)" if result.get("truncated") else ""))
     return 0
 
 
@@ -4535,6 +4595,7 @@ HANDLERS = {
     "callees":     cmd_callees,
     "touchpoints": cmd_touchpoints,
     "diff":        cmd_diff,
+    "graph":       cmd_graph,
     "report":         cmd_report,
     "global-report":  cmd_global_report,
     "serve":          cmd_serve,

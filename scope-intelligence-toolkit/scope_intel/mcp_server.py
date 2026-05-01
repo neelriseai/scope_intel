@@ -939,6 +939,30 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "scope_graph",
+        "description": (
+            "Generate a Mermaid or DOT diagram from the scope index. "
+            "kind=class → classDiagram (classes, methods, inheritance);  "
+            "kind=deps → import dependency graph (file → file);  "
+            "kind=calls → call graph (callers → symbol → callees)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "query":  {"type": "string", "description": "Feature id, file path, or symbol name."},
+                "target": {"type": "string", "enum": ["feature", "file", "symbol"],
+                           "default": "feature"},
+                "kind":   {"type": "string", "enum": ["class", "deps", "calls"],
+                           "default": "class"},
+                "format": {"type": "string", "enum": ["mermaid", "dot"],
+                           "default": "mermaid"},
+                "max_nodes": {"type": "integer", "default": 60},
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "mem_federation",
         "description": (
             "Manage the cross-repo federation registry. "
@@ -1012,6 +1036,16 @@ def _call_tool(name: str, arguments: dict) -> dict:
         return compute_diff_scope(repo, arguments.get("ref", "HEAD~1"))
     if name == "scope_report":
         return compute_savings_summary(repo)
+    if name == "scope_graph":
+        from .core.graph_renderer import render_graph
+        return render_graph(
+            repo,
+            target=arguments.get("target", "feature"),
+            query=arguments["query"],
+            kind=arguments.get("kind", "class"),
+            format=arguments.get("format", "mermaid"),
+            max_nodes=arguments.get("max_nodes", 60),
+        )
 
     # --- Phase 4: MemPalace ---
     if name == "mem_add":
