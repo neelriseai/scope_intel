@@ -1230,6 +1230,16 @@ def _ingest_python_only(
 
     _progress(f"Routing done → {len(buckets)} output file(s) — writing…")
 
+    # --- read pinned files from existing index.json (if any) ---
+    _pinned_paths: set[str] = set()
+    _existing_index_path = gen_dir / "index.json"
+    if _existing_index_path.exists():
+        try:
+            _existing_idx = json.loads(_existing_index_path.read_text(encoding="utf-8"))
+            _pinned_paths = set(_existing_idx.get("pinned_files", []))
+        except Exception:  # noqa: BLE001
+            pass
+
     # --- write files ---
     generated_files: list[dict] = []
     skipped_files: list[str] = []
@@ -1243,6 +1253,24 @@ def _ingest_python_only(
             out_path = cur_dir / f"{slug}.md"
 
         rel = str(out_path.relative_to(repo_root)).replace("\\", "/")
+
+        # Pinned files are ALWAYS skipped, even with overwrite=True
+        if rel in _pinned_paths and out_path.exists():
+            skipped_files.append(rel)
+            try:
+                existing_content = out_path.read_text(encoding="utf-8")
+                written_hash = hashlib.sha256(existing_content.encode()).hexdigest()[:8]
+            except OSError:
+                written_hash = ""
+            generated_files.append({
+                "path": rel,
+                "title": bucket["primary_title"],
+                "sections": len(bucket["sections"]),
+                "layer": dest_type,
+                "status": "skipped_pinned",
+                "written_hash": written_hash,
+            })
+            continue
 
         if out_path.exists() and not overwrite:
             skipped_files.append(rel)
@@ -1296,11 +1324,12 @@ def _ingest_python_only(
     index_path = gen_dir / "index.json"
     source_hash = _doc_hash(doc_path)
     index_data = {
-        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "source":       doc_path.name,
-        "source_hash":  source_hash,
-        "mode":         "python",
-        "total_files":  len(generated_files),
+        "generated_at":  time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "source":        doc_path.name,
+        "source_hash":   source_hash,
+        "mode":          "python",
+        "total_files":   len(generated_files),
+        "pinned_files":  sorted(_pinned_paths),   # preserve existing pins
         "files": [
             {
                 "id":           f["path"].split("/")[-1].replace(".md", ""),

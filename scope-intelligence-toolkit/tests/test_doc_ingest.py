@@ -23,7 +23,10 @@ from scope_intel.adapters.doc_reader import (
     _docx_table_to_markdown,
 )
 from scope_intel.core.llm_client import NullLLMClient, get_client
-from scope_intel.cli import _doc_list, _doc_fetch, _doc_search, _doc_fetch_for, _doc_diff
+from scope_intel.cli import (
+    _doc_list, _doc_fetch, _doc_search, _doc_fetch_for, _doc_diff,
+    _doc_pin, _doc_unpin, _read_pinned,
+)
 from scope_intel.core.doc_ingestor import (
     _route_section,
     _split_sections,
@@ -1542,3 +1545,93 @@ class TestDocDiff:
         for key in ("source", "generated_at", "total_checked",
                     "unchanged", "modified", "missing", "extra", "has_changes"):
             assert key in result, f"missing key: {key}"
+
+
+# ---------------------------------------------------------------------------
+# TestDocPin
+# ---------------------------------------------------------------------------
+
+class TestDocPin:
+    """Tests for _doc_pin / _doc_unpin / pin-awareness in ingest."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def _first_generated_id(self, repo):
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        files = [f for f in idx["files"] if f["layer"] == "generated"]
+        assert files, "no generated files in index"
+        return files[0]["id"], files[0]["path"]
+
+    def test_pin_adds_to_pinned_files(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid, rel = self._first_generated_id(repo)
+        result = _doc_pin(repo, fid)
+        assert "error" not in result
+        assert result["pinned"] is True
+        pinned = _read_pinned(repo)
+        assert rel in pinned
+
+    def test_pin_unknown_id_returns_error(self, repo, md_file):
+        self._ingest(repo, md_file)
+        result = _doc_pin(repo, "xyzzy-nonexistent-99999")
+        assert "error" in result
+
+    def test_pin_already_pinned_is_idempotent(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid, rel = self._first_generated_id(repo)
+        _doc_pin(repo, fid)
+        result = _doc_pin(repo, fid)
+        assert "error" not in result
+        assert result.get("already_pinned") is True
+        # Should still be in pinned set
+        assert rel in _read_pinned(repo)
+
+    def test_unpin_removes_from_pinned(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid, rel = self._first_generated_id(repo)
+        _doc_pin(repo, fid)
+        result = _doc_unpin(repo, fid)
+        assert "error" not in result
+        assert result["unpinned"] is True
+        assert rel not in _read_pinned(repo)
+
+    def test_unpin_not_pinned_is_safe(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid, _ = self._first_generated_id(repo)
+        result = _doc_unpin(repo, fid)
+        assert "error" not in result
+        assert result.get("not_pinned") is True
+
+    def test_ingest_skips_pinned_even_with_overwrite(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid, rel = self._first_generated_id(repo)
+        _doc_pin(repo, fid)
+
+        # Re-ingest with overwrite=True — pinned file must NOT be overwritten
+        target = repo / rel
+        target.write_text("# MANUALLY EDITED\n\nKeep this.\n", encoding="utf-8")
+        original_content = target.read_text(encoding="utf-8")
+
+        result = ingest_document(repo, md_file, overwrite=True)
+        assert "error" not in result
+
+        # Content must be unchanged
+        after_content = target.read_text(encoding="utf-8")
+        assert after_content == original_content, "pinned file was overwritten!"
+
+        # Status should be skipped_pinned
+        statuses = {f["path"]: f["status"] for f in result["generated"]}
+        assert statuses.get(rel) == "skipped_pinned"
+
+    def test_pins_preserved_across_ingest_runs(self, repo, md_file):
+        self._ingest(repo, md_file)
+        fid, rel = self._first_generated_id(repo)
+        _doc_pin(repo, fid)
+
+        # Second ingest should preserve the pin in the new index.json
+        ingest_document(repo, md_file, overwrite=True)
+        pinned = _read_pinned(repo)
+        assert rel in pinned, "pin was lost after re-ingest"

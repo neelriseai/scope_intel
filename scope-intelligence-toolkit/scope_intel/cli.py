@@ -276,6 +276,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_fetchfor.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc pin / unpin — protect a generated file from being overwritten by ingest/rebuild
+    p_pin = doc_sub.add_parser(
+        "pin",
+        help=(
+            "Pin a generated .ai-context/ file so it is never overwritten by "
+            "`scope doc ingest --overwrite` or `scope doc rebuild`."
+        ),
+    )
+    p_pin.add_argument(
+        "file_id",
+        help="File id or partial name (e.g. '001', 'roadmap', 'constraints').",
+    )
+    p_pin.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_pin.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
+    p_unpin = doc_sub.add_parser(
+        "unpin",
+        help="Remove a pin from a .ai-context/ file, allowing it to be overwritten again.",
+    )
+    p_unpin.add_argument(
+        "file_id",
+        help="File id or partial name to unpin.",
+    )
+    p_unpin.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_unpin.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc check — health validation
     p_check = doc_sub.add_parser(
         "check",
@@ -1236,14 +1262,20 @@ def _fmt_ingest(r: dict) -> None:
         flag = "  ⚠ run: scope mem conflicts" if n > 0 else ""
         print(f"  post-ingest conflicts: {n}{flag}")
 
-    written = [f for f in r.get("generated", []) if f.get("status") == "written"]
-    skipped = [f for f in r.get("generated", []) if f.get("status") == "skipped_existing"]
+    written  = [f for f in r.get("generated", []) if f.get("status") == "written"]
+    skipped  = [f for f in r.get("generated", []) if f.get("status") == "skipped_existing"]
+    pinned_s = [f for f in r.get("generated", []) if f.get("status") == "skipped_pinned"]
 
     if written:
         print("\ngenerated files:")
         for f in sorted(written, key=lambda x: x["path"]):
             layer_tag = f"[{f['layer']}]"
             print(f"  {layer_tag:<12} {f['path']}")
+
+    if pinned_s:
+        print("\nskipped (pinned — use `scope doc unpin <id>` to allow overwrite):")
+        for f in sorted(pinned_s, key=lambda x: x["path"]):
+            print(f"  📌 {f['path']}")
 
     if skipped:
         print("\nskipped (already exist — use --overwrite to regenerate):")
@@ -1596,6 +1628,100 @@ def _fmt_doc_diff(r: dict) -> None:
 
     if not r["has_changes"]:
         print(f"\n  All {r['total_checked']} file(s) match their ingest-time hashes.")
+
+
+def _read_pinned(repo: Path) -> set[str]:
+    """Read the set of pinned file paths from index.json (returns empty set if absent)."""
+    index_path = repo / ".ai-context" / "generated" / "index.json"
+    if not index_path.exists():
+        return set()
+    try:
+        idx = json.loads(index_path.read_text(encoding="utf-8"))
+        return set(idx.get("pinned_files", []))
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _write_pinned(repo: Path, pinned: set[str]) -> bool:
+    """Write the updated pinned_files list to index.json.  Returns True on success."""
+    index_path = repo / ".ai-context" / "generated" / "index.json"
+    if not index_path.exists():
+        return False
+    try:
+        idx = json.loads(index_path.read_text(encoding="utf-8"))
+        idx["pinned_files"] = sorted(pinned)
+        index_path.write_text(json.dumps(idx, indent=2, ensure_ascii=False),
+                               encoding="utf-8")
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _resolve_file_id(repo: Path, name: str) -> tuple[str, str] | None:
+    """Resolve a partial file id/name to (file_id, relative_path) using index.json + curated/.
+
+    Returns None if no match or ambiguous.
+    """
+    index_path = repo / ".ai-context" / "generated" / "index.json"
+    curated_dir = repo / ".ai-context" / "curated"
+    q = name.lower()
+
+    candidates: list[tuple[str, str]] = []  # (id, rel_path)
+
+    if index_path.exists():
+        try:
+            idx = json.loads(index_path.read_text(encoding="utf-8"))
+            for f in idx.get("files", []):
+                if q in f["id"].lower() or q in f.get("title", "").lower():
+                    candidates.append((f["id"], f["path"]))
+        except Exception:  # noqa: BLE001
+            pass
+
+    if curated_dir.exists():
+        for p in curated_dir.glob("*.md"):
+            if q in p.stem.lower():
+                rel = str(p.relative_to(repo)).replace("\\", "/")
+                cid = p.stem
+                if not any(c[0] == cid for c in candidates):
+                    candidates.append((cid, rel))
+
+    if len(candidates) == 1:
+        return candidates[0]
+    return None   # 0 matches or ambiguous
+
+
+def _doc_pin(repo: Path, name: str) -> dict:
+    """Pin a .ai-context/ file by id/partial-name."""
+    match = _resolve_file_id(repo, name)
+    if match is None:
+        return {"error": f"no unique file matching '{name}' — use `scope doc list` to see ids"}
+    fid, rel = match
+    pinned = _read_pinned(repo)
+    if rel in pinned:
+        return {"pinned": False, "already_pinned": True, "id": fid, "path": rel}
+    pinned.add(rel)
+    ok = _write_pinned(repo, pinned)
+    if not ok:
+        return {"error": "could not update index.json — is .ai-context/ readable?"}
+    return {"pinned": True, "id": fid, "path": rel,
+            "note": f"'{fid}' is now pinned — ingest/rebuild will skip it"}
+
+
+def _doc_unpin(repo: Path, name: str) -> dict:
+    """Remove a pin from a .ai-context/ file."""
+    match = _resolve_file_id(repo, name)
+    if match is None:
+        return {"error": f"no unique file matching '{name}' — use `scope doc list` to see ids"}
+    fid, rel = match
+    pinned = _read_pinned(repo)
+    if rel not in pinned:
+        return {"unpinned": False, "not_pinned": True, "id": fid, "path": rel}
+    pinned.discard(rel)
+    ok = _write_pinned(repo, pinned)
+    if not ok:
+        return {"error": "could not update index.json"}
+    return {"unpinned": True, "id": fid, "path": rel,
+            "note": f"'{fid}' unpinned — ingest/rebuild can overwrite it again"}
 
 
 def _doc_fetch_for(
@@ -2379,6 +2505,34 @@ def cmd_doc(args) -> int:
         _emit(result, args.json, formatter=_fmt_doc_diff)
         return 0 if "error" not in result and not result.get("has_changes") else \
                1 if "error" not in result else 2
+
+    if args.doc_cmd == "pin":
+        repo = _resolve_repo(args.repo)
+        result = _doc_pin(repo, args.file_id)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        elif result.get("already_pinned"):
+            print(f"already pinned: {result['id']}  ({result['path']})")
+        else:
+            print(f"pinned: {result['id']}  ({result['path']})")
+            print(f"  → {result['note']}")
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "unpin":
+        repo = _resolve_repo(args.repo)
+        result = _doc_unpin(repo, args.file_id)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        elif result.get("not_pinned"):
+            print(f"not pinned: {result['id']}  ({result['path']})")
+        else:
+            print(f"unpinned: {result['id']}  ({result['path']})")
+            print(f"  → {result['note']}")
+        return 0 if "error" not in result else 2
 
     if args.doc_cmd == "fetch-for":
         repo = _resolve_repo(args.repo)

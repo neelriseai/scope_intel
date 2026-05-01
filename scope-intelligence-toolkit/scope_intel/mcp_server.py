@@ -504,6 +504,41 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_pin",
+        "description": (
+            "Pin a generated .ai-context/ file so it is never overwritten by "
+            "future `doc_ingest` or `doc_rebuild` calls. "
+            "Use this to protect manually-curated sections you want to keep. "
+            "Run doc_list to see valid file ids."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "file_id": {
+                    "type": "string",
+                    "description": "File id or partial name (e.g. 'roadmap', '003', 'constraints').",
+                },
+            },
+            "required": ["file_id"],
+        },
+    },
+    {
+        "name": "doc_unpin",
+        "description": "Remove a pin from a .ai-context/ file, allowing future ingest to overwrite it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "file_id": {
+                    "type": "string",
+                    "description": "File id or partial name to unpin.",
+                },
+            },
+            "required": ["file_id"],
+        },
+    },
+    {
         "name": "doc_diff",
         "description": (
             "Compare current .ai-context/ file contents against the hashes recorded "
@@ -906,6 +941,14 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_templates_created": total_tmpl,
             "results":                 results,
         }
+
+    if name == "doc_pin":
+        from .cli import _doc_pin
+        return _doc_pin(repo, arguments["file_id"])
+
+    if name == "doc_unpin":
+        from .cli import _doc_unpin
+        return _doc_unpin(repo, arguments["file_id"])
 
     if name == "doc_diff":
         from .cli import _doc_diff
