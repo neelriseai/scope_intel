@@ -2197,3 +2197,151 @@ class TestDocSearchTag:
         result = _doc_search(repo, "anything", tag_filter="count-test")
         # Only 1 file tagged — files_searched should be 1
         assert result["files_searched"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TestDocValidate
+# ---------------------------------------------------------------------------
+
+class TestDocValidate:
+    """Tests for _doc_validate — .ai-context/ integrity checker."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def test_no_ai_context_returns_error(self, repo):
+        from scope_intel.cli import _doc_validate
+        result = _doc_validate(repo)
+        assert "error" in result
+
+    def test_clean_ingest_is_ok(self, repo, md_file):
+        from scope_intel.cli import _doc_validate
+        self._ingest(repo, md_file)
+        result = _doc_validate(repo)
+        assert "error" not in result
+        assert result["ok"] is True
+        assert result["errors"] == 0
+
+    def test_result_keys_present(self, repo, md_file):
+        from scope_intel.cli import _doc_validate
+        self._ingest(repo, md_file)
+        result = _doc_validate(repo)
+        for key in ("ok", "total_issues", "errors", "warnings", "issues"):
+            assert key in result, f"missing key: {key}"
+
+    def test_issues_is_list(self, repo, md_file):
+        from scope_intel.cli import _doc_validate
+        self._ingest(repo, md_file)
+        result = _doc_validate(repo)
+        assert isinstance(result["issues"], list)
+
+    def test_orphaned_entry_detected_E001(self, repo, md_file):
+        """Deleting a generated file while keeping the index entry → E001."""
+        from scope_intel.cli import _doc_validate
+        self._ingest(repo, md_file)
+        # Remove one of the generated .md files from disk
+        gen_dir = repo / ".ai-context" / "generated"
+        md_files = sorted(gen_dir.glob("*.md"))
+        assert md_files, "need at least one generated .md file"
+        victim = md_files[0]
+        victim.unlink()
+        result = _doc_validate(repo)
+        assert result["errors"] >= 1
+        codes = [i["code"] for i in result["issues"]]
+        assert "E001" in codes
+
+    def test_drift_detected_W001(self, repo, md_file):
+        """Editing a generated file after ingest → W001."""
+        from scope_intel.cli import _doc_validate
+        self._ingest(repo, md_file)
+        gen_dir = repo / ".ai-context" / "generated"
+        md_files = sorted(gen_dir.glob("*.md"))
+        assert md_files
+        # Append content to simulate post-ingest edit
+        md_files[0].write_text(
+            md_files[0].read_text(encoding="utf-8") + "\n\n<!-- manual edit -->",
+            encoding="utf-8",
+        )
+        result = _doc_validate(repo)
+        codes = [i["code"] for i in result["issues"]]
+        assert "W001" in codes
+        # Warnings don't make ok=False
+        assert result["ok"] is True  # warnings only → still ok
+
+    def test_total_issues_matches_list(self, repo, md_file):
+        from scope_intel.cli import _doc_validate
+        self._ingest(repo, md_file)
+        result = _doc_validate(repo)
+        assert result["total_issues"] == len(result["issues"])
+
+
+# ---------------------------------------------------------------------------
+# TestDocRename
+# ---------------------------------------------------------------------------
+
+class TestDocRename:
+    """Tests for _doc_rename — rename a curated .ai-context/ file."""
+
+    def _make_curated(self, repo, stem: str, content: str = "# Title\n\nBody.") -> Path:
+        cur_dir = repo / ".ai-context" / "curated"
+        cur_dir.mkdir(parents=True, exist_ok=True)
+        p = cur_dir / f"{stem}.md"
+        p.write_text(content, encoding="utf-8")
+        return p
+
+    def test_rename_moves_file(self, repo):
+        from scope_intel.cli import _doc_rename
+        self._make_curated(repo, "constraints")
+        result = _doc_rename(repo, "constraints", "new-constraints")
+        assert "error" not in result, result
+        assert result["ok"] is True
+        assert (repo / ".ai-context" / "curated" / "new-constraints.md").exists()
+        assert not (repo / ".ai-context" / "curated" / "constraints.md").exists()
+
+    def test_rename_result_keys(self, repo):
+        from scope_intel.cli import _doc_rename
+        self._make_curated(repo, "design-spec")
+        result = _doc_rename(repo, "design-spec", "api-spec")
+        for key in ("ok", "old_path", "new_path", "annotations_updated"):
+            assert key in result, f"missing key: {key}"
+
+    def test_rename_unknown_file_returns_error(self, repo):
+        from scope_intel.cli import _doc_rename
+        self._make_curated(repo, "existing")
+        result = _doc_rename(repo, "xyzzy-no-such", "new-name")
+        assert "error" in result
+
+    def test_rename_target_already_exists_returns_error(self, repo):
+        from scope_intel.cli import _doc_rename
+        self._make_curated(repo, "alpha")
+        self._make_curated(repo, "beta")
+        result = _doc_rename(repo, "alpha", "beta")
+        assert "error" in result
+
+    def test_rename_updates_annotations(self, repo):
+        from scope_intel.cli import _doc_rename
+        import json as _json
+        self._make_curated(repo, "old-name")
+        ai_ctx = repo / ".ai-context"
+        ann_path = ai_ctx / "annotations.json"
+        old_rel = ".ai-context/curated/old-name.md"
+        # Seed an annotation for the old path
+        ann_path.write_text(
+            _json.dumps({old_rel: [{"ts": "2025-01-01T00:00:00Z", "note": "seed"}]}),
+            encoding="utf-8",
+        )
+        result = _doc_rename(repo, "old-name", "renamed-file")
+        assert "error" not in result
+        ann_updated = _json.loads(ann_path.read_text(encoding="utf-8"))
+        new_rel = ".ai-context/curated/renamed-file.md"
+        assert new_rel in ann_updated
+        assert old_rel not in ann_updated
+        assert result["annotations_updated"] == 1
+
+    def test_rename_partial_name_match(self, repo):
+        from scope_intel.cli import _doc_rename
+        self._make_curated(repo, "authentication-spec")
+        # Partial match: "auth" should find "authentication-spec"
+        result = _doc_rename(repo, "auth", "auth-spec")
+        assert "error" not in result, result
+        assert (repo / ".ai-context" / "curated" / "auth-spec.md").exists()

@@ -551,6 +551,44 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_validate",
+        "description": (
+            "Check .ai-context/ integrity: orphaned index entries, untracked files on disk, "
+            "post-ingest hash drift (W001), missing annotation targets (W002), "
+            "and snapshot references to deleted files (W003). "
+            "Returns ok=true only when there are zero errors (warnings are non-blocking). "
+            "Run after any manual edit or bulk re-ingest to catch inconsistencies early."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": _REPO_PROP,
+        },
+    },
+    {
+        "name": "doc_rename",
+        "description": (
+            "Rename a curated .ai-context/ file on disk and update any annotations.json "
+            "references to the new path. "
+            "Use partial name or stem (e.g. 'constraints', 'api-spec'). "
+            "Only works on curated/ files — generated files are managed by ingest."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "old": {
+                    "type": "string",
+                    "description": "Current name or partial stem of the curated file.",
+                },
+                "new": {
+                    "type": "string",
+                    "description": "New name (with or without .md extension).",
+                },
+            },
+            "required": ["old", "new"],
+        },
+    },
+    {
         "name": "doc_snapshot_save",
         "description": (
             "Save a named point-in-time snapshot of all .ai-context/ file content hashes. "
@@ -1126,6 +1164,14 @@ def _call_tool(name: str, arguments: dict) -> dict:
     if name == "doc_report":
         from .cli import _doc_report
         return _doc_report(repo)
+
+    if name == "doc_validate":
+        from .cli import _doc_validate
+        return _doc_validate(repo)
+
+    if name == "doc_rename":
+        from .cli import _doc_rename
+        return _doc_rename(repo, arguments["old"], arguments["new"])
 
     if name == "doc_snapshot_save":
         from .cli import _doc_snapshot_save

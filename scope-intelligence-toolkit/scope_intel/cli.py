@@ -440,6 +440,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_export.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc validate — check .ai-context/ integrity
+    p_validate = doc_sub.add_parser(
+        "validate",
+        help="Check .ai-context/ integrity: orphaned entries, untracked files, hash drift.",
+    )
+    p_validate.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_validate.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
+    # doc rename — rename a curated .ai-context/ file
+    p_rename = doc_sub.add_parser(
+        "rename",
+        help="Rename a curated .ai-context/ file and update annotations references.",
+    )
+    p_rename.add_argument("old", help="Current name or partial id of the curated file.")
+    p_rename.add_argument("new", help="New name (without extension).")
+    p_rename.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_rename.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc snapshot — named point-in-time checkpoints of .ai-context/ file hashes
     p_snap = doc_sub.add_parser(
         "snapshot",
@@ -3175,6 +3193,184 @@ def _doc_export(
     }
 
 
+def _doc_validate(repo: Path) -> dict:
+    """Check .ai-context/ integrity: orphaned index entries, untracked files, drift.
+
+    Returns:
+        {ok, total_issues, errors, warnings,
+         issues: [{severity, code, message, file}]}
+    Severity codes:
+        E001 — index entry references a file that does not exist on disk
+        E002 — file on disk has no matching index entry (untracked)
+        W001 — current file hash differs from written_hash (post-ingest edit)
+        W002 — annotation entry references a missing file
+        W003 — snapshot references a path no longer on disk
+    """
+    import hashlib as _hl
+    ai_ctx = repo / ".ai-context"
+    if not ai_ctx.exists():
+        return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
+
+    issues: list[dict] = []
+
+    def _add(severity: str, code: str, message: str, file: str = "") -> None:
+        issues.append({"severity": severity, "code": code, "message": message, "file": file})
+
+    # ---- Load index --------------------------------------------------------
+    index_path = ai_ctx / "generated" / "index.json"
+    index_files: list[dict] = []
+    if index_path.exists():
+        try:
+            index_files = json.loads(index_path.read_text(encoding="utf-8")).get("files", [])
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Build set of paths known to the index (relative to repo, forward-slash)
+    indexed_paths: set[str] = set()
+    for entry in index_files:
+        rel: str = entry.get("path", "").replace("\\", "/")
+        if not rel:
+            continue
+        indexed_paths.add(rel)
+        full = repo / rel
+        # E001 — index entry missing on disk
+        if not full.exists():
+            _add("error", "E001",
+                 f"index entry exists but file not found on disk: {rel}", rel)
+            continue
+        # W001 — drift detection (written_hash present and mismatches)
+        wh = entry.get("written_hash", "")
+        if wh:
+            current = _hl.sha256(full.read_text(encoding="utf-8", errors="replace")
+                                  .encode()).hexdigest()[:8]
+            if current != wh:
+                _add("warning", "W001",
+                     f"file was edited after ingest (hash {wh!r} → {current!r}): {rel}", rel)
+
+    # ---- Scan disk for untracked generated files ---------------------------
+    gen_dir = ai_ctx / "generated"
+    if gen_dir.exists():
+        for p in gen_dir.glob("*.md"):
+            rel = str(p.relative_to(repo)).replace("\\", "/")
+            if rel not in indexed_paths:
+                _add("error", "E002",
+                     f"file on disk has no index entry (untracked): {rel}", rel)
+
+    # ---- Check annotations.json --------------------------------------------
+    ann_path = ai_ctx / "annotations.json"
+    if ann_path.exists():
+        try:
+            ann_data = json.loads(ann_path.read_text(encoding="utf-8"))
+            for ann_rel, entries in ann_data.items():
+                if not entries:
+                    continue
+                full = repo / ann_rel
+                if not full.exists():
+                    _add("warning", "W002",
+                         f"annotations.json references missing file: {ann_rel}", ann_rel)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ---- Check snapshots ---------------------------------------------------
+    snap_dir = ai_ctx / "snapshots"
+    if snap_dir.exists():
+        for sp in snap_dir.glob("*.json"):
+            try:
+                snap = json.loads(sp.read_text(encoding="utf-8"))
+                for snap_rel in snap.get("hashes", {}).keys():
+                    full = repo / snap_rel
+                    if not full.exists():
+                        _add("warning", "W003",
+                             f"snapshot '{sp.stem}' references missing file: {snap_rel}",
+                             snap_rel)
+            except Exception:  # noqa: BLE001
+                pass
+
+    errors   = sum(1 for i in issues if i["severity"] == "error")
+    warnings = sum(1 for i in issues if i["severity"] == "warning")
+    return {
+        "ok":           errors == 0,
+        "total_issues": len(issues),
+        "errors":       errors,
+        "warnings":     warnings,
+        "issues":       issues,
+    }
+
+
+def _fmt_doc_validate(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    status = "✓ OK" if r["ok"] else f"✗ {r['errors']} error(s)"
+    print(f"{status}  ({r['warnings']} warning(s)  {r['total_issues']} total issue(s))")
+    if not r["issues"]:
+        print("  .ai-context/ integrity check passed.")
+        return
+    for issue in r["issues"]:
+        icon = "✗" if issue["severity"] == "error" else "⚠"
+        print(f"  {icon} [{issue['code']}] {issue['message']}")
+
+
+def _doc_rename(repo: Path, old_name: str, new_name: str) -> dict:
+    """Rename a curated .ai-context/ file and update annotations.json references.
+
+    Returns:
+        {ok, old_path, new_path, annotations_updated}
+    or {'error': ...}
+    """
+    ai_ctx = repo / ".ai-context"
+    cur_dir = ai_ctx / "curated"
+    if not cur_dir.exists():
+        return {"error": "no .ai-context/curated/ directory — nothing to rename"}
+
+    # Resolve old file
+    old_md = new_name if new_name.endswith(".md") else f"{new_name}.md"  # used later
+    old_stem = old_name.removesuffix(".md") if old_name.endswith(".md") else old_name
+
+    # Find matching curated file (partial, case-insensitive)
+    old_path: Path | None = None
+    for p in sorted(cur_dir.glob("*.md")):
+        if old_stem.lower() in p.stem.lower():
+            old_path = p
+            break
+    if old_path is None:
+        return {"error": f"no curated file matching '{old_name}' in .ai-context/curated/"}
+
+    # Build new path
+    new_stem = new_name.removesuffix(".md") if new_name.endswith(".md") else new_name
+    new_path = cur_dir / f"{new_stem}.md"
+    if new_path.exists() and new_path != old_path:
+        return {"error": f"target file already exists: {new_path.name}"}
+
+    old_rel = str(old_path.relative_to(repo)).replace("\\", "/")
+    new_rel = str(new_path.relative_to(repo)).replace("\\", "/")
+
+    # Rename on disk
+    old_path.rename(new_path)
+
+    # Update annotations.json
+    ann_path = ai_ctx / "annotations.json"
+    ann_updated = 0
+    if ann_path.exists():
+        try:
+            ann_data = json.loads(ann_path.read_text(encoding="utf-8"))
+            if old_rel in ann_data:
+                ann_data[new_rel] = ann_data.pop(old_rel)
+                ann_updated = len(ann_data[new_rel])
+                ann_path.write_text(
+                    json.dumps(ann_data, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {
+        "ok":                  True,
+        "old_path":            old_rel,
+        "new_path":            new_rel,
+        "annotations_updated": ann_updated,
+    }
+
+
 def cmd_doc(args) -> int:
     if args.doc_cmd == "ingest":
         repo = _resolve_repo(args.repo)
@@ -3594,6 +3790,26 @@ def cmd_doc(args) -> int:
             if not args.clear_all:
                 print("curated/ preserved — use --all to also remove curated files")
         return 0
+
+    if args.doc_cmd == "validate":
+        repo = _resolve_repo(args.repo)
+        result = _doc_validate(repo)
+        _emit(result, args.json, formatter=_fmt_doc_validate)
+        return 0 if ("error" not in result and result.get("ok", False)) else \
+               1 if "error" not in result else 2
+
+    if args.doc_cmd == "rename":
+        repo = _resolve_repo(args.repo)
+        result = _doc_rename(repo, args.old, args.new)
+        if args.json:
+            print(json.dumps(result, indent=2))
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        else:
+            print(f"renamed: {result['old_path']}  →  {result['new_path']}")
+            if result["annotations_updated"]:
+                print(f"  {result['annotations_updated']} annotation(s) re-linked")
+        return 0 if "error" not in result else 2
 
     print(f"unknown doc subcommand: {args.doc_cmd}", file=sys.stderr)
     return 2
