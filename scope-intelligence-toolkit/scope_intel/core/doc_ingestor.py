@@ -1147,6 +1147,7 @@ def _ingest_python_only(
     """
     from ..adapters.doc_reader import read_document
 
+    _progress(f"Reading {doc_path.name}…")
     read_result = read_document(doc_path)
     if "error" in read_result:
         return read_result
@@ -1156,7 +1157,9 @@ def _ingest_python_only(
         return {"error": "document is empty or contains no extractable text"}
 
     # --- parse sections ---
+    _progress(f"Parsing sections…")
     sections = _split_sections(text)
+    _progress(f"Found {len(sections)} section(s) — routing…")
 
     # --- route sections to output files ---
     # bucket key: (dest_type, slug) → merged content
@@ -1210,6 +1213,8 @@ def _ingest_python_only(
     if not dry_run:
         gen_dir.mkdir(parents=True, exist_ok=True)
         cur_dir.mkdir(parents=True, exist_ok=True)
+
+    _progress(f"Routing done → {len(buckets)} output file(s) — writing…")
 
     # --- write files ---
     generated_files: list[dict] = []

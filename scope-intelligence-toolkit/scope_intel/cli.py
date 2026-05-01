@@ -209,6 +209,10 @@ def build_parser() -> argparse.ArgumentParser:
             "(compared by SHA-256 hash stored in index.json)."
         ),
     )
+    p_ingest.add_argument(
+        "--verify", action="store_true",
+        help="Run `scope doc check` immediately after ingest and append health report to result.",
+    )
     p_ingest.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc list — show what's been generated
@@ -1223,6 +1227,19 @@ def _fmt_ingest(r: dict) -> None:
         if len(r["unmatched_sections"]) > 10:
             print(f"  ... +{len(r['unmatched_sections']) - 10} more")
 
+    # --verify health check summary
+    hc = r.get("health_check")
+    if hc and "error" not in hc:
+        hc_status = "✓ healthy" if hc.get("healthy") else \
+                    f"⚠ {hc.get('warnings',0)} warning(s)" if not hc.get("errors") else \
+                    f"✗ {hc.get('errors',0)} error(s)"
+        print(f"\npost-ingest health check: {hc_status}")
+        for issue in hc.get("issues", []):
+            sym = "✗" if issue["level"] == "error" else "⚠"
+            print(f"  {sym} {issue['file']}: {issue['msg']}")
+        if hc.get("healthy"):
+            print("  all files look good")
+
     # Routing table — shown in dry-run mode to let users debug section routing
     rt = r.get("routing_table", [])
     if r.get("dry_run") and rt:
@@ -1861,6 +1878,10 @@ def cmd_doc(args) -> int:
             second_pass=args.second_pass,
             if_changed=getattr(args, "if_changed", False),
         )
+        # --verify: run doc check immediately after ingest
+        if getattr(args, "verify", False) and "error" not in result and not result.get("dry_run"):
+            check = _doc_check(repo)
+            result["health_check"] = check
         _emit(result, args.json, formatter=_fmt_ingest)
         return 0 if "error" not in result else 2
 

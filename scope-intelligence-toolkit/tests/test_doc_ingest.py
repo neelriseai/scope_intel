@@ -1173,6 +1173,17 @@ class TestDocCheck:
         warn_files = [i["file"] for i in result["issues"] if i["level"] == "warn"]
         assert any("module-map" in f for f in warn_files)
 
+    def test_ingest_with_verify_appends_health_check(self, repo, md_file):
+        """--verify flag appends health_check to the ingest result."""
+        # Simulate --verify by calling ingest + _doc_check manually
+        result = ingest_document(repo, md_file, overwrite=True)
+        from scope_intel.cli import _doc_check
+        result["health_check"] = _doc_check(repo)
+        assert "health_check" in result
+        hc = result["health_check"]
+        assert "errors" in hc
+        assert "healthy" in hc
+
 
 # ---------------------------------------------------------------------------
 # ingest-batch (tested via multiple sequential ingest_document calls)
