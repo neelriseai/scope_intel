@@ -438,15 +438,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_export.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc snapshot — named point-in-time checkpoints of .ai-context/ file hashes
+    p_snap = doc_sub.add_parser(
+        "snapshot",
+        help=(
+            "Manage named snapshots of .ai-context/ file hashes. "
+            "Snapshots let you track which files changed between design iterations."
+        ),
+    )
+    snap_sub = p_snap.add_subparsers(dest="snap_cmd", required=True)
+
+    p_snap_save = snap_sub.add_parser("save", help="Save current hashes as a named snapshot.")
+    p_snap_save.add_argument("name", help="Snapshot name (e.g. 'v1', 'after-review', 'pre-rebuild').")
+    p_snap_save.add_argument("--repo", default=".")
+    p_snap_save.add_argument("--json", action="store_true")
+
+    p_snap_list = snap_sub.add_parser("list", help="List all saved snapshots.")
+    p_snap_list.add_argument("--repo", default=".")
+    p_snap_list.add_argument("--json", action="store_true")
+
+    p_snap_del = snap_sub.add_parser("delete", help="Delete a snapshot by name.")
+    p_snap_del.add_argument("name", help="Snapshot name to delete.")
+    p_snap_del.add_argument("--repo", default=".")
+    p_snap_del.add_argument("--json", action="store_true")
+
     # doc diff — show files manually edited since last ingest
     p_ddiff = doc_sub.add_parser(
         "diff",
         help=(
             "Show which .ai-context/ files have been manually edited since the last "
-            "ingest run (content hash mismatch against index.json baseline)."
+            "ingest run (or since a named snapshot with --since)."
         ),
     )
     p_ddiff.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_ddiff.add_argument(
+        "--since", metavar="SNAPSHOT",
+        help="Diff against a named snapshot (created with `scope doc snapshot save <name>`).",
+    )
     p_ddiff.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc stats — token/char counts per .ai-context/ file
@@ -1686,6 +1714,185 @@ def _fmt_doc_diff(r: dict) -> None:
         print(f"\n  All {r['total_checked']} file(s) match their ingest-time hashes.")
 
 
+def _snapshots_dir(repo: Path) -> Path:
+    return repo / ".ai-context" / "snapshots"
+
+
+def _snapshot_path(repo: Path, name: str) -> Path:
+    safe = name.replace("/", "-").replace("\\", "-")
+    return _snapshots_dir(repo) / f"{safe}.json"
+
+
+def _doc_snapshot_save(repo: Path, name: str) -> dict:
+    """Capture current .ai-context/ file hashes as a named snapshot."""
+    import hashlib as _hashlib
+    import time as _time
+
+    ai_ctx = repo / ".ai-context"
+    if not ai_ctx.exists():
+        return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
+
+    files: list[dict] = []
+    for directory, layer in [
+        (ai_ctx / "generated", "generated"),
+        (ai_ctx / "curated",   "curated"),
+    ]:
+        if not directory.exists():
+            continue
+        for p in sorted(directory.glob("*.md")):
+            rel = str(p.relative_to(repo)).replace("\\", "/")
+            try:
+                content = p.read_text(encoding="utf-8")
+                h = _hashlib.sha256(content.encode()).hexdigest()[:8]
+            except OSError:
+                h = ""
+            files.append({
+                "id":    p.stem,
+                "path":  rel,
+                "layer": layer,
+                "hash":  h,
+                "chars": len(content) if h else 0,
+            })
+
+    snap_dir = _snapshots_dir(repo)
+    snap_dir.mkdir(parents=True, exist_ok=True)
+
+    snapshot = {
+        "name":        name,
+        "created_at":  _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        "total_files": len(files),
+        "files":       files,
+    }
+    _snapshot_path(repo, name).write_text(
+        json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return {"saved": True, "name": name, "total_files": len(files),
+            "path": str(_snapshot_path(repo, name).relative_to(repo)).replace("\\", "/")}
+
+
+def _doc_snapshot_list(repo: Path) -> dict:
+    snap_dir = _snapshots_dir(repo)
+    if not snap_dir.exists():
+        return {"snapshots": [], "total": 0}
+    snapshots: list[dict] = []
+    for p in sorted(snap_dir.glob("*.json")):
+        try:
+            snap = json.loads(p.read_text(encoding="utf-8"))
+            snapshots.append({
+                "name":        snap.get("name", p.stem),
+                "created_at":  snap.get("created_at", "?"),
+                "total_files": snap.get("total_files", 0),
+            })
+        except Exception:  # noqa: BLE001
+            snapshots.append({"name": p.stem, "created_at": "?", "total_files": 0})
+    return {"snapshots": snapshots, "total": len(snapshots)}
+
+
+def _doc_snapshot_delete(repo: Path, name: str) -> dict:
+    sp = _snapshot_path(repo, name)
+    if not sp.exists():
+        return {"error": f"snapshot '{name}' not found"}
+    sp.unlink()
+    return {"deleted": True, "name": name}
+
+
+def _doc_diff_since(repo: Path, snapshot_name: str) -> dict:
+    """Diff current .ai-context/ files against a named snapshot."""
+    import hashlib as _hashlib
+
+    sp = _snapshot_path(repo, snapshot_name)
+    if not sp.exists():
+        return {"error": f"snapshot '{snapshot_name}' not found — "
+                         f"create one with `scope doc snapshot save {snapshot_name}`"}
+    try:
+        snap = json.loads(sp.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"snapshot unreadable: {exc}"}
+
+    snap_files: dict[str, str] = {f["path"]: f["hash"] for f in snap.get("files", [])}
+
+    ai_ctx = repo / ".ai-context"
+    current_files: dict[str, str] = {}
+    for directory in [ai_ctx / "generated", ai_ctx / "curated"]:
+        if not directory.exists():
+            continue
+        for p in sorted(directory.glob("*.md")):
+            rel = str(p.relative_to(repo)).replace("\\", "/")
+            try:
+                content = p.read_text(encoding="utf-8")
+                current_files[rel] = _hashlib.sha256(content.encode()).hexdigest()[:8]
+            except OSError:
+                current_files[rel] = ""
+
+    unchanged: list[dict] = []
+    modified:  list[dict] = []
+    missing:   list[dict] = []
+    added:     list[dict] = []  # new files not in snapshot
+
+    for rel, snap_hash in snap_files.items():
+        cur_hash = current_files.get(rel)
+        base = {"id": rel.split("/")[-1].replace(".md", ""), "path": rel}
+        if cur_hash is None:
+            missing.append({**base, "snap_hash": snap_hash})
+        elif cur_hash == snap_hash:
+            unchanged.append({**base, "hash": cur_hash})
+        else:
+            modified.append({**base, "snap_hash": snap_hash, "current_hash": cur_hash})
+
+    for rel, cur_hash in current_files.items():
+        if rel not in snap_files:
+            added.append({"id": rel.split("/")[-1].replace(".md", ""), "path": rel,
+                          "current_hash": cur_hash})
+
+    has_changes = bool(modified or missing or added)
+    return {
+        "snapshot":      snapshot_name,
+        "snapshot_at":   snap.get("created_at", "?"),
+        "total_checked": len(snap_files),
+        "unchanged":     unchanged,
+        "modified":      modified,
+        "missing":       missing,
+        "added":         added,
+        "has_changes":   has_changes,
+    }
+
+
+def _fmt_snapshot_list(r: dict) -> None:
+    snaps = r.get("snapshots", [])
+    if not snaps:
+        print("no snapshots saved yet")
+        print("  → create one with: scope doc snapshot save <name>")
+        return
+    print(f"snapshots ({r['total']}):")
+    for s in snaps:
+        print(f"  {s['name']:<25} {s['created_at']}  ({s['total_files']} files)")
+
+
+def _fmt_doc_diff_since(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    status = "✓ no changes" if not r["has_changes"] else \
+             (f"⚠ {len(r['modified'])} modified  {len(r['missing'])} missing  "
+              f"{len(r['added'])} added")
+    print(f"scope doc diff --since '{r['snapshot']}'  (taken {r['snapshot_at']})  — {status}")
+    print(f"  checked: {r['total_checked']} file(s) in snapshot")
+    if r.get("modified"):
+        print(f"\nmodified ({len(r['modified'])}):")
+        for f in r["modified"]:
+            print(f"  ✎ {f['path']}")
+            print(f"      snapshot={f['snap_hash']}  current={f['current_hash']}")
+    if r.get("missing"):
+        print(f"\ndeleted since snapshot ({len(r['missing'])}):")
+        for f in r["missing"]:
+            print(f"  ✗ {f['path']}")
+    if r.get("added"):
+        print(f"\nadded since snapshot ({len(r['added'])}):")
+        for f in r["added"]:
+            print(f"  + {f['path']}")
+    if not r["has_changes"]:
+        print(f"\n  All {r['total_checked']} file(s) unchanged since snapshot.")
+
+
 def _read_pinned(repo: Path) -> set[str]:
     """Read the set of pinned file paths from index.json (returns empty set if absent)."""
     index_path = repo / ".ai-context" / "generated" / "index.json"
@@ -2781,10 +2988,44 @@ def cmd_doc(args) -> int:
         _emit(result, args.json, formatter=_fmt_doc_annotate)
         return 0 if "error" not in result else 2
 
+    if args.doc_cmd == "snapshot":
+        repo = _resolve_repo(args.repo)
+        sc = args.snap_cmd
+        if sc == "save":
+            result = _doc_snapshot_save(repo, args.name)
+            if args.json:
+                print(json.dumps(result, indent=2))
+            elif "error" in result:
+                print(result["error"], file=sys.stderr)
+            else:
+                print(f"snapshot saved: '{result['name']}'  "
+                      f"({result['total_files']} files)  → {result['path']}")
+            return 0 if "error" not in result else 2
+        if sc == "list":
+            result = _doc_snapshot_list(repo)
+            _emit(result, args.json, formatter=_fmt_snapshot_list)
+            return 0
+        if sc == "delete":
+            result = _doc_snapshot_delete(repo, args.name)
+            if args.json:
+                print(json.dumps(result, indent=2))
+            elif "error" in result:
+                print(result["error"], file=sys.stderr)
+            else:
+                print(f"deleted snapshot: '{result['name']}'")
+            return 0 if "error" not in result else 2
+        print(f"unknown snapshot subcommand: {sc}", file=sys.stderr)
+        return 2
+
     if args.doc_cmd == "diff":
         repo = _resolve_repo(args.repo)
-        result = _doc_diff(repo)
-        _emit(result, args.json, formatter=_fmt_doc_diff)
+        since = getattr(args, "since", None)
+        if since:
+            result = _doc_diff_since(repo, since)
+            _emit(result, args.json, formatter=_fmt_doc_diff_since)
+        else:
+            result = _doc_diff(repo)
+            _emit(result, args.json, formatter=_fmt_doc_diff)
         return 0 if "error" not in result and not result.get("has_changes") else \
                1 if "error" not in result else 2
 

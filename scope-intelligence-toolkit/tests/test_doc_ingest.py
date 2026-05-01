@@ -1801,3 +1801,99 @@ class TestDocSection:
         filtered_gen = [f for f in full_list.get("generated", []) if f["path"] in pinned_paths]
         assert len(filtered_gen) == 1
         assert filtered_gen[0]["id"] == fid
+
+
+# ---------------------------------------------------------------------------
+# TestDocSnapshot
+# ---------------------------------------------------------------------------
+
+class TestDocSnapshot:
+    """Tests for _doc_snapshot_save / _doc_snapshot_list / _doc_diff_since."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def test_save_snapshot_returns_saved(self, repo, md_file):
+        from scope_intel.cli import _doc_snapshot_save
+        self._ingest(repo, md_file)
+        result = _doc_snapshot_save(repo, "v1")
+        assert "error" not in result
+        assert result["saved"] is True
+        assert result["name"] == "v1"
+        assert result["total_files"] > 0
+
+    def test_snapshot_file_created_on_disk(self, repo, md_file):
+        from scope_intel.cli import _doc_snapshot_save, _snapshot_path
+        self._ingest(repo, md_file)
+        _doc_snapshot_save(repo, "test-snap")
+        sp = _snapshot_path(repo, "test-snap")
+        assert sp.exists()
+        data = json.loads(sp.read_text(encoding="utf-8"))
+        assert data["name"] == "test-snap"
+        assert len(data["files"]) > 0
+
+    def test_snapshot_list_includes_saved(self, repo, md_file):
+        from scope_intel.cli import _doc_snapshot_save, _doc_snapshot_list
+        self._ingest(repo, md_file)
+        _doc_snapshot_save(repo, "alpha")
+        _doc_snapshot_save(repo, "beta")
+        result = _doc_snapshot_list(repo)
+        names = [s["name"] for s in result["snapshots"]]
+        assert "alpha" in names
+        assert "beta" in names
+        assert result["total"] >= 2
+
+    def test_diff_since_no_changes(self, repo, md_file):
+        from scope_intel.cli import _doc_snapshot_save, _doc_diff_since
+        self._ingest(repo, md_file)
+        _doc_snapshot_save(repo, "baseline")
+        result = _doc_diff_since(repo, "baseline")
+        assert "error" not in result
+        assert result["has_changes"] is False
+        assert len(result["unchanged"]) > 0
+        assert len(result["modified"]) == 0
+
+    def test_diff_since_detects_modification(self, repo, md_file):
+        from scope_intel.cli import _doc_snapshot_save, _doc_diff_since
+        self._ingest(repo, md_file)
+        _doc_snapshot_save(repo, "before")
+
+        # Modify a generated file
+        gen_dir = repo / ".ai-context" / "generated"
+        md_files = list(gen_dir.glob("*.md"))
+        assert md_files
+        target = md_files[0]
+        target.write_text(target.read_text(encoding="utf-8") + "\n<!-- edited -->\n",
+                          encoding="utf-8")
+
+        result = _doc_diff_since(repo, "before")
+        assert result["has_changes"] is True
+        modified_paths = [f["path"] for f in result["modified"]]
+        rel = str(target.relative_to(repo)).replace("\\", "/")
+        assert rel in modified_paths
+
+    def test_diff_since_detects_added_file(self, repo, md_file):
+        from scope_intel.cli import _doc_snapshot_save, _doc_diff_since
+        self._ingest(repo, md_file)
+        _doc_snapshot_save(repo, "before")
+
+        # Add a new file after snapshot
+        new_file = repo / ".ai-context" / "generated" / "999-new.md"
+        new_file.write_text("# New\nContent.\n", encoding="utf-8")
+
+        result = _doc_diff_since(repo, "before")
+        assert result["has_changes"] is True
+        added_paths = [f["path"] for f in result["added"]]
+        assert ".ai-context/generated/999-new.md" in added_paths
+
+    def test_diff_since_unknown_snapshot_returns_error(self, repo, md_file):
+        from scope_intel.cli import _doc_diff_since
+        self._ingest(repo, md_file)
+        result = _doc_diff_since(repo, "nonexistent-snapshot")
+        assert "error" in result
+
+    def test_snapshot_list_empty_when_none_saved(self, repo):
+        from scope_intel.cli import _doc_snapshot_list
+        result = _doc_snapshot_list(repo)
+        assert result["snapshots"] == []
+        assert result["total"] == 0

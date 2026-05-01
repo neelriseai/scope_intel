@@ -504,6 +504,52 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_snapshot_save",
+        "description": (
+            "Save a named point-in-time snapshot of all .ai-context/ file content hashes. "
+            "Use this before a rebuild or major edit so you can later diff against it. "
+            "Snapshots are stored in .ai-context/snapshots/."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "name": {
+                    "type": "string",
+                    "description": "Snapshot name (e.g. 'v1', 'after-review', 'pre-rebuild').",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "doc_snapshot_list",
+        "description": "List all saved .ai-context/ snapshots with names and creation timestamps.",
+        "inputSchema": {
+            "type": "object",
+            "properties": _REPO_PROP,
+        },
+    },
+    {
+        "name": "doc_diff_since",
+        "description": (
+            "Diff current .ai-context/ files against a named snapshot. "
+            "Returns lists of: unchanged, modified, deleted (missing), added. "
+            "Use doc_snapshot_save first to create a baseline."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "snapshot": {
+                    "type": "string",
+                    "description": "Name of the snapshot to compare against.",
+                },
+            },
+            "required": ["snapshot"],
+        },
+    },
+    {
         "name": "doc_section",
         "description": (
             "Extract a specific heading section from a .ai-context/ file "
@@ -1000,6 +1046,18 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_templates_created": total_tmpl,
             "results":                 results,
         }
+
+    if name == "doc_snapshot_save":
+        from .cli import _doc_snapshot_save
+        return _doc_snapshot_save(repo, arguments["name"])
+
+    if name == "doc_snapshot_list":
+        from .cli import _doc_snapshot_list
+        return _doc_snapshot_list(repo)
+
+    if name == "doc_diff_since":
+        from .cli import _doc_diff_since
+        return _doc_diff_since(repo, arguments["snapshot"])
 
     if name == "doc_section":
         from .cli import _doc_fetch_section
