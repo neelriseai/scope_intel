@@ -569,6 +569,155 @@ class TestMemPalaceConfidenceDecay:
         assert eff == 0.7
 
 
+class TestMemTouch:
+    """Phase 6.1 — scope mem touch reinforces a memory by resetting ts."""
+
+    def _backdate(self, repo, mem_id: str, days: int) -> None:
+        import datetime
+        entries = store.read_mempalace(repo)
+        new_ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        new_ts_str = new_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+        for e in entries:
+            if e.get("id") == mem_id:
+                e["ts"] = new_ts_str
+        path = repo / ".scope-intelligence" / "mempalace.jsonl"
+        path.write_text(
+            "\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8"
+        )
+
+    def test_touch_updates_ts(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        import datetime
+        e = add_memory(repo, "semantic", "aging fact", confidence=0.8, features=["auth"])
+        self._backdate(repo, e["id"], days=100)
+
+        result = touch_memory(repo, e["id"])
+        assert "error" not in result, result
+        # ts should be very recent (within last 5 seconds)
+        ts = datetime.datetime.strptime(result["ts"], "%Y-%m-%dT%H:%M:%SZ")
+        age = (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - ts).total_seconds()
+        assert age < 5
+
+    def test_touch_records_old_ts_in_history(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        e = add_memory(repo, "semantic", "tracked fact", confidence=0.9, features=["auth"])
+        self._backdate(repo, e["id"], days=50)
+        # Read the backdated ts — that's what touch will move into history
+        entries = store.read_mempalace(repo)
+        backdated_ts = next(x["ts"] for x in entries if x["id"] == e["id"])
+
+        result = touch_memory(repo, e["id"])
+        assert "reinforced_at" in result
+        # The backdated ts (the one that was live before touch) should be in history
+        assert backdated_ts in result["reinforced_at"]
+
+    def test_touch_accumulates_history(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        e = add_memory(repo, "semantic", "multi-touch", confidence=0.9, features=["auth"])
+        touch_memory(repo, e["id"])
+        result = touch_memory(repo, e["id"])
+        assert len(result.get("reinforced_at", [])) >= 2
+
+    def test_touch_raises_effective_confidence(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        from scope_intel.core.mempalace import _effective_confidence
+        e = add_memory(repo, "semantic", "decayed", confidence=0.9, features=["auth"])
+        self._backdate(repo, e["id"], days=270)  # 3 half-lives → ~0.11 effective
+        # Verify it actually decayed
+        entries = store.read_mempalace(repo)
+        decayed_entry = next(x for x in entries if x["id"] == e["id"])
+        eff_before = _effective_confidence(decayed_entry)
+        assert eff_before < 0.2
+
+        touch_memory(repo, e["id"])
+        entries = store.read_mempalace(repo)
+        fresh = next(x for x in entries if x["id"] == e["id"])
+        eff_after = _effective_confidence(fresh)
+        assert eff_after > eff_before
+
+    def test_touch_unknown_id_returns_error(self, repo):
+        from scope_intel.core.mempalace import touch_memory
+        result = touch_memory(repo, "mp_nonexistent")
+        assert "error" in result
+
+
+class TestMemPrune:
+    """Phase 6.1 — scope mem prune deletes semantics below effective threshold."""
+
+    def _backdate(self, repo, mem_id: str, days: int) -> None:
+        import datetime
+        entries = store.read_mempalace(repo)
+        new_ts = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        for e in entries:
+            if e.get("id") == mem_id:
+                e["ts"] = new_ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+        path = repo / ".scope-intelligence" / "mempalace.jsonl"
+        path.write_text(
+            "\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8"
+        )
+
+    def test_prune_removes_decayed_entries(self, repo):
+        from scope_intel.core.mempalace import prune_memories
+        old = add_memory(repo, "semantic", "ancient", confidence=0.9, features=["auth"])
+        add_memory(repo, "semantic", "fresh", confidence=0.9, features=["auth"])
+        # age old one 5 half-lives → effective ≈ 0.028
+        self._backdate(repo, old["id"], days=450)
+
+        result = prune_memories(repo, below=0.05)
+        assert "error" not in result, result
+        assert result["pruned"] == 1
+        assert result["removed"][0]["id"] == old["id"]
+        remaining = store.read_mempalace(repo)
+        ids = [e["id"] for e in remaining]
+        assert old["id"] not in ids
+
+    def test_dry_run_does_not_delete(self, repo):
+        from scope_intel.core.mempalace import prune_memories
+        old = add_memory(repo, "semantic", "would-be-pruned",
+                         confidence=0.9, features=["auth"])
+        self._backdate(repo, old["id"], days=450)
+
+        result = prune_memories(repo, below=0.05, dry_run=True)
+        assert result["dry_run"] is True
+        assert result["pruned"] == 0          # nothing actually deleted
+        assert len(result["removed"]) == 1    # preview shows it
+        remaining = store.read_mempalace(repo)
+        ids = [e["id"] for e in remaining]
+        assert old["id"] in ids              # still there
+
+    def test_non_semantic_never_pruned(self, repo):
+        from scope_intel.core.mempalace import prune_memories
+        bug = add_memory(repo, "bug", "old bug", features=["auth"])
+        self._backdate(repo, bug["id"], days=999)
+
+        result = prune_memories(repo, below=0.99)
+        assert result["pruned"] == 0
+        remaining_ids = [e["id"] for e in store.read_mempalace(repo)]
+        assert bug["id"] in remaining_ids
+
+    def test_prune_result_keys(self, repo):
+        from scope_intel.core.mempalace import prune_memories
+        add_memory(repo, "semantic", "some fact", confidence=0.9, features=["auth"])
+        result = prune_memories(repo, below=0.0)  # threshold 0 = nothing pruned
+        for key in ("pruned", "kept", "dry_run", "threshold", "removed"):
+            assert key in result
+
+    def test_half_life_override_affects_pruning(self, repo):
+        """A shorter override half-life decays faster, pruning entries that default wouldn't."""
+        from scope_intel.core.mempalace import prune_memories
+        e = add_memory(repo, "semantic", "medium age",
+                       confidence=0.9, features=["auth"])
+        # 45 days back — with default 90d HL: eff ≈ 0.636 (safe)
+        # with 10d HL: eff ≈ 0.9 * 0.5^(45/10) ≈ 0.019 (prunable)
+        self._backdate(repo, e["id"], days=45)
+
+        safe = prune_memories(repo, below=0.05)           # default HL=90
+        assert safe["pruned"] == 0
+
+        aggressive = prune_memories(repo, below=0.05, half_life_days=10)
+        assert aggressive["pruned"] == 1
+
+
 class TestMemPalaceList:
     def test_list_all(self, repo):
         add_memory(repo, "bug", "b1", features=["auth"])

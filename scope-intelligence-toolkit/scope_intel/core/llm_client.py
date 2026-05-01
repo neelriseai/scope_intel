@@ -114,7 +114,7 @@ class OllamaClient:
     """Calls a local Ollama instance for structured JSON extraction.
 
     Constructor args:
-        model      — Ollama model tag, e.g. "qwen2.5:14b"
+        model      — Ollama model tag, e.g. "qwen2.5:7b"
         url        — Ollama server base URL (default: http://localhost:11434)
         timeout    — HTTP timeout in seconds per request (default: 120)
         temperature — Sampling temperature (default: 0.1 — near-deterministic)
@@ -122,7 +122,7 @@ class OllamaClient:
 
     def __init__(
         self,
-        model: str = "qwen2.5:14b",
+        model: str = "qwen2.5:7b",
         url: str = "http://localhost:11434",
         timeout: int = 120,
         temperature: float = 0.1,
@@ -325,13 +325,13 @@ class NullLLMClient:
 
 def get_client(
     mode: str = "python",
-    model: str = "qwen2.5:14b",
+    model: str = "qwen2.5:7b",
     url: str = "http://localhost:11434",
 ) -> OllamaClient | NullLLMClient:
     """Return the right client for the requested mode.
 
     mode='python' → NullLLMClient (no LLM calls, zero overhead)
-    mode='llm'    → OllamaClient (Qwen via Ollama)
+    mode='llm'    → OllamaClient (Qwen via Ollama; default model: qwen2.5:7b)
 
     The caller should check client.is_available() if it needs to know
     whether the LLM is actually reachable.
@@ -339,3 +339,90 @@ def get_client(
     if mode == "llm":
         return OllamaClient(model=model, url=url)
     return NullLLMClient()
+
+
+# ---------------------------------------------------------------------------
+# File-path probe — answers the question "can Ollama read from a local path?"
+# ---------------------------------------------------------------------------
+
+def probe_file_path(
+    path: str,
+    url: str = "http://localhost:11434",
+    model: str = "qwen2.5:7b",
+    timeout: int = 30,
+) -> dict:
+    """Test whether Ollama can ingest a local file path directly.
+
+    Background: Ollama's /api/generate endpoint accepts a `prompt` string.
+    It has NO built-in "read this path" feature — the client must read the
+    file and send the *content* in the prompt. This probe verifies that
+    assumption by:
+      1. Reading the file on the Python side
+      2. Sending the first 500 chars as a prompt
+      3. Asking the model to respond with a JSON classification
+
+    Returns:
+        {
+          "can_read_path": bool,         # always False — Ollama needs content
+          "can_read_content": bool,      # True if Ollama responded correctly
+          "path_tried": str,
+          "bytes_sent": int,
+          "model": str,
+          "error": str | None
+        }
+
+    Conclusion: you must read the file locally and pass content — Ollama
+    will NOT accept a filesystem path or a OneDrive/cloud URL. For large
+    PDFs or .docx files use the existing doc_reader adapters which handle
+    binary-to-text conversion before sending to the LLM.
+    """
+    import urllib.request as _req
+
+    result: dict = {
+        "can_read_path":    False,   # hard-coded: Ollama has no path API
+        "can_read_content": False,
+        "path_tried":       path,
+        "bytes_sent":       0,
+        "model":            model,
+        "error":            None,
+    }
+
+    # Step 1: read locally
+    try:
+        from pathlib import Path as _Path
+        text = _Path(path).read_text(encoding="utf-8", errors="replace")[:500]
+        result["bytes_sent"] = len(text.encode("utf-8"))
+    except Exception as exc:
+        result["error"] = f"local read failed: {exc}"
+        return result
+
+    # Step 2: send content to Ollama
+    payload = {
+        "model":  model,
+        "prompt": (
+            f"Classify this text into one of: roadmap, constraints, architecture, "
+            f"schema, procedure, other. Respond with JSON only: {{\"type\": \"...\"}}\n\n"
+            f"Text:\n{text}"
+        ),
+        "stream": False,
+        "options": {"temperature": 0.0, "num_predict": 64},
+        "format": "json",
+    }
+    try:
+        req = _req.Request(
+            f"{url.rstrip('/')}/api/generate",
+            data=__import__("json").dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _req.urlopen(req, timeout=timeout) as resp:
+            data = __import__("json").loads(resp.read().decode("utf-8"))
+            response_text = data.get("response", "").strip()
+            # Accept if we got any JSON back with a "type" key
+            parsed = __import__("json").loads(response_text) if response_text else {}
+            result["can_read_content"] = bool(parsed.get("type"))
+            result["llm_response"] = parsed
+    except Exception as exc:
+        result["error"] = f"Ollama request failed: {exc}"
+
+    return result

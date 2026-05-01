@@ -634,6 +634,96 @@ def auto_capture_from_git(
     }
 
 
+def touch_memory(repo_root: Path, mem_id: str) -> dict:
+    """Reinforce a memory by refreshing its ts; preserves prior ts in history.
+
+    Effect: effective_confidence at next fetch jumps back to the base value.
+    The previous ts is appended to `reinforced_at` so we keep the history.
+
+    Returns the updated entry, or {error: ...} if not found.
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    entries = store.read_mempalace(repo_root)
+    target_idx: Optional[int] = None
+    for i, e in enumerate(entries):
+        if e.get("id") == mem_id:
+            target_idx = i
+            break
+    if target_idx is None:
+        return {"error": f"no memory with id '{mem_id}'"}
+
+    entry = dict(entries[target_idx])
+    old_ts = entry.get("ts", "")
+    new_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    history = list(entry.get("reinforced_at", []))
+    if old_ts:
+        history.append(old_ts)
+    entry["ts"] = new_ts
+    entry["reinforced_at"] = history
+
+    entries[target_idx] = entry
+    _rewrite_mempalace(repo_root, entries)
+    return entry
+
+
+def prune_memories(
+    repo_root: Path,
+    *,
+    below: float = 0.2,
+    dry_run: bool = False,
+    half_life_days: Optional[int] = None,
+) -> dict:
+    """Delete semantic memories whose *effective* confidence has dropped below a threshold.
+
+    Unlike ``decay_confidence`` (which rewrites stored values), this removes
+    entries entirely so the JSONL shrinks. Non-semantic entries are never pruned.
+
+    Args:
+        below:         Entries with effective_confidence < below are pruned.
+        dry_run:       Preview only — nothing is deleted.
+        half_life_days: Override the repo default (config.semantic_half_life).
+
+    Returns {pruned, kept, dry_run, removed[{id, note, effective_confidence}]}
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    hl = half_life_days if (half_life_days and half_life_days > 0) else _config_half_life(repo_root)
+
+    entries = store.read_mempalace(repo_root)
+    kept: list = []
+    removed: list = []
+
+    for e in entries:
+        if e.get("type") != "semantic":
+            kept.append(e)
+            continue
+        eff = _effective_confidence(e, default_half_life=hl)
+        if eff < below:
+            removed.append({
+                "id":                    e["id"],
+                "note":                  e.get("note", "")[:80],
+                "effective_confidence":  eff,
+                "confidence":            e.get("confidence", 1.0),
+            })
+        else:
+            kept.append(e)
+
+    if not dry_run and removed:
+        _rewrite_mempalace(repo_root, kept)
+
+    return {
+        "pruned":   len(removed) if not dry_run else 0,
+        "removed":  removed,
+        "kept":     len(kept),
+        "dry_run":  dry_run,
+        "threshold": below,
+    }
+
+
 def _rewrite_mempalace(repo_root: Path, entries: list) -> None:
     path = store.mempalace_path(repo_root)
     with path.open("w", encoding="utf-8") as f:

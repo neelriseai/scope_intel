@@ -36,8 +36,10 @@ from .core.mempalace import (
     import_memories,
     list_memories,
     memory_stats,
+    prune_memories,
     resolve_memory,
     search_memories,
+    touch_memory,
 )
 from .core.doc_ingestor import ingest_document
 from .core.reporter import format_global_html, format_global_terminal, format_html, format_terminal
@@ -191,8 +193,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_ingest.add_argument(
-        "--ollama-model", default="qwen2.5:14b", metavar="MODEL",
-        help="Ollama model to use in --mode llm (default: qwen2.5:14b).",
+        "--ollama-model", default="qwen2.5:7b", metavar="MODEL",
+        help="Ollama model to use in --mode llm (default: qwen2.5:7b).",
     )
     p_ingest.add_argument(
         "--ollama-url", default="http://localhost:11434", metavar="URL",
@@ -394,7 +396,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode", choices=["python", "llm"], default="python",
         help="Extraction mode (default: python).",
     )
-    p_ibatch.add_argument("--ollama-model", default="qwen2.5:14b", metavar="MODEL")
+    p_ibatch.add_argument("--ollama-model", default="qwen2.5:7b", metavar="MODEL")
     p_ibatch.add_argument("--ollama-url", default="http://localhost:11434", metavar="URL")
     p_ibatch.add_argument("--no-claude-md", action="store_true")
     p_ibatch.add_argument(
@@ -414,7 +416,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode", choices=["python", "llm"], default="python",
         help="Extraction mode (default: python).",
     )
-    p_rebuild.add_argument("--ollama-model", default="qwen2.5:14b", metavar="MODEL")
+    p_rebuild.add_argument("--ollama-model", default="qwen2.5:7b", metavar="MODEL")
     p_rebuild.add_argument("--ollama-url", default="http://localhost:11434", metavar="URL")
     p_rebuild.add_argument("--second-pass", action="store_true")
     p_rebuild.add_argument("--no-claude-md", action="store_true")
@@ -648,6 +650,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_search.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc llm-probe — check whether Ollama can classify local file content
+    p_llm_probe = doc_sub.add_parser(
+        "llm-probe",
+        help=(
+            "Probe Ollama: verify it can classify a local file's content. "
+            "Answers whether file-path passing works vs. content passing. "
+            "Requires Ollama running with qwen2.5:7b (or --model) pulled."
+        ),
+    )
+    p_llm_probe.add_argument("file", help="Local file path to read and classify.")
+    p_llm_probe.add_argument(
+        "--model", default="qwen2.5:7b",
+        help="Ollama model to test against (default: qwen2.5:7b).",
+    )
+    p_llm_probe.add_argument(
+        "--url", default="http://localhost:11434",
+        help="Ollama server URL (default: http://localhost:11434).",
+    )
+    p_llm_probe.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # mem — MemPalace long-term memory
     p_mem = sub.add_parser("mem", help="MemPalace: long-term knowledge store.")
     mem_sub = p_mem.add_subparsers(dest="mem_cmd", required=True)
@@ -780,6 +802,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_mconf.add_argument("--repo", default=".")
     p_mconf.add_argument("--include-resolved", action="store_true")
     p_mconf.add_argument("--json", action="store_true")
+
+    # mem touch  (Phase 6.1) — reinforce a memory by resetting its timestamp
+    p_mtouch = mem_sub.add_parser(
+        "touch",
+        help="Reinforce a memory: reset its timestamp so effective_confidence returns to base.",
+    )
+    p_mtouch.add_argument("id", help="Memory id (mp_...).")
+    p_mtouch.add_argument("--repo", default=".")
+    p_mtouch.add_argument("--json", action="store_true")
+
+    # mem prune  (Phase 6.1) — delete semantics whose effective_confidence < threshold
+    p_mprune = mem_sub.add_parser(
+        "prune",
+        help="Delete semantic memories whose effective_confidence has decayed below a threshold.",
+    )
+    p_mprune.add_argument("--repo", default=".")
+    p_mprune.add_argument(
+        "--below", type=float, default=0.2,
+        help="Remove entries with effective_confidence < this value (default: 0.2).",
+    )
+    p_mprune.add_argument(
+        "--half-life", type=int, default=None, dest="half_life_days",
+        help="Override half-life for this run (days, default: config.semantic_half_life).",
+    )
+    p_mprune.add_argument("--dry-run", action="store_true",
+                          help="Preview what would be removed without deleting.")
+    p_mprune.add_argument("--json", action="store_true")
 
     return p
 
@@ -4045,6 +4094,23 @@ def cmd_doc(args) -> int:
             print(f"copied: {result['source_path']}  →  {result['new_path']}")
         return 0 if "error" not in result else 2
 
+    if args.doc_cmd == "llm-probe":
+        from .core.llm_client import probe_file_path
+        result = probe_file_path(args.file, url=args.url, model=args.model)
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print(f"file path: {result['path_tried']}")
+            print(f"  can_read_path:    {result['can_read_path']}  "
+                  f"(Ollama has no built-in path API — you must pass content)")
+            print(f"  can_read_content: {result['can_read_content']}  "
+                  f"(model={result['model']}, bytes_sent={result['bytes_sent']})")
+            if result.get("error"):
+                print(f"  error: {result['error']}", file=sys.stderr)
+            elif result.get("llm_response"):
+                print(f"  llm classified as: {result['llm_response'].get('type','?')}")
+        return 0 if not result.get("error") else 2
+
     if args.doc_cmd == "touch":
         repo = _resolve_repo(args.repo)
         result = _doc_touch(repo, args.name, reason=args.reason, author=args.author)
@@ -4222,6 +4288,39 @@ def cmd_mem(args) -> int:
         result = detect_conflicts(repo, include_resolved=args.include_resolved)
         _emit(result, args.json, formatter=_fmt_conflicts)
         return 0
+
+    if mc == "touch":
+        result = touch_memory(repo, args.id)
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        else:
+            eff = result.get("effective_confidence", result.get("confidence", "?"))
+            hist = len(result.get("reinforced_at", []))
+            print(f"reinforced: {result['id']}  base={result.get('confidence','?')}  "
+                  f"reinforcements={hist}")
+        return 0 if "error" not in result else 2
+
+    if mc == "prune":
+        result = prune_memories(
+            repo,
+            below=args.below,
+            dry_run=args.dry_run,
+            half_life_days=getattr(args, "half_life_days", None),
+        )
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        else:
+            label = "[dry-run] would remove" if result["dry_run"] else "pruned"
+            print(f"{label} {len(result['removed'])} semantic memories "
+                  f"(effective_confidence < {result['threshold']:.2f})  "
+                  f"kept={result['kept']}")
+            for r in result["removed"]:
+                print(f"  {r['id']}  eff={r['effective_confidence']:.4f}  {r['note'][:60]}")
+        return 0 if "error" not in result else 2
 
     print(f"unknown mem subcommand: {mc}", file=sys.stderr)
     return 2
