@@ -3,7 +3,8 @@
 `scope_intel` reduces AI token consumption by giving an assistant a precise,
 precomputed map of a repository instead of making it read the whole codebase.
 It combines scope indexing, impact analysis, test discovery, repo memory,
-document context, and compact sidecars for agent-facing context.
+LLM-assisted document parsing/classification, and compact sidecars for
+agent-facing context.
 
 In practice, this lets an assistant ask:
 
@@ -29,7 +30,7 @@ come when agents query `scope inventory`, `scope feature`, `scope impacted`,
 | Area | What it provides |
 | --- | --- |
 | Scope index | Files, languages, packages, features, imports, reverse imports |
-| Inventory | File/class/symbol roster without opening source files |
+| Inventory | CLI/MCP file, class, and symbol roster without opening source files |
 | Impact analysis | Direct and transitive blast radius for files, symbols, features |
 | Test mapping | Related tests for files and features |
 | Symbol graph | Classes, functions, methods, callers, callees |
@@ -37,7 +38,7 @@ come when agents query `scope inventory`, `scope feature`, `scope impacted`,
 | Graph output | Mermaid/DOT class, dependency, and call graphs |
 | Token tracking | Query log and savings reports |
 | MemPalace | Semantic, procedural, episodic, and structural repo memory |
-| Doc ingest | `.ai-context/` architecture and design context |
+| Doc ingest | `.ai-context/` architecture context using fast Python mode or Qwen/Ollama LLM classification |
 | Compact sidecars | Agent-readable compact DSL plus exact compressed payload |
 | MCP server | 52 JSON-RPC tools for AI environments that support tools |
 
@@ -64,6 +65,7 @@ scope index path/to/repo
 # Inspect the repo cheaply
 scope summary --repo path/to/repo
 scope inventory --repo path/to/repo --no-symbols
+scope inventory --repo path/to/repo --feature auth --json
 scope features --repo path/to/repo
 
 # Work on a feature
@@ -75,6 +77,40 @@ scope mem fetch --feature auth --repo path/to/repo
 # Refresh after edits
 scope update --repo path/to/repo --files src/auth/login.py tests/auth/test_login.py
 ```
+
+## Inventory Without Reading Source
+
+Yes, the repo roster capability exists. Use `scope inventory` from the CLI or
+`scope_inventory` from MCP to list files, classes, and symbols already captured
+in the index. This lets an agent understand what exists in any indexed Git repo
+without spending tokens on source bodies.
+
+```bash
+scope inventory --repo .
+scope inventory --repo . --no-symbols
+scope inventory --repo . --feature auth --json
+```
+
+For MCP clients, call `scope_inventory` with `repo`, optional `feature`, and
+`include_symbols=false` when the assistant only needs the file/class roster.
+
+## LLM Document Ingest With Qwen
+
+Document ingest has two modes:
+
+- `python`: fast deterministic parsing/routing, no LLM.
+- `llm`: Qwen through Ollama reads chunks, classifies them, extracts richer
+  context, and can run a second pass to synthesize `module-map.md`.
+
+```bash
+scope doc ingest docs/design.md --repo . --mode llm --ollama-model qwen2.5:7b
+scope doc ingest docs/design.md --repo . --mode llm --second-pass --verify
+scope doc ingest-batch docs --repo . --mode llm --if-changed
+```
+
+The generated `.ai-context/` files can then be queried by `scope doc fetch`,
+`scope doc fetch-for`, `scope doc search`, and compacted with
+`scope compact build --target ai-context`.
 
 ## Compact Context Workflow
 
@@ -122,8 +158,9 @@ files before finishing.
 For architecture or design-doc work:
 
 ```text
-Use scope doc fetch-for <feature> and scope compact stats/validate before
-loading large .ai-context documents.
+If a new design document must be parsed, use `scope doc ingest --mode llm`
+with Qwen/Ollama, then use `scope doc fetch-for <feature>` and compact
+sidecars before loading large `.ai-context` documents.
 ```
 
 ## MCP Server
@@ -146,6 +183,8 @@ The MCP server exposes 52 tools, including:
 - `compact_stats`
 - `mem_fetch`
 - `doc_fetch_for_feature`
+- `doc_ingest`
+- `doc_ingest_batch`
 
 Use the MCP server when your AI environment can call tools directly. Use the CLI
 when the assistant can run shell commands.

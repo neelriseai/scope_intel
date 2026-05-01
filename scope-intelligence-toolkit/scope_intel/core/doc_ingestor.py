@@ -1053,7 +1053,7 @@ def ingest_document(
     dry_run: bool = False,
     update_claude_md: bool = True,
     mode: str = "python",
-    ollama_model: str = "qwen2.5:14b",
+    ollama_model: str = "qwen2.5:7b",
     ollama_url: str = "http://localhost:11434",
     second_pass: bool = False,
     if_changed: bool = False,
