@@ -718,6 +718,68 @@ class TestMemPrune:
         assert aggressive["pruned"] == 1
 
 
+class TestMemCapture:
+    """Phase 6.2 — agent-triggered signal-based captures."""
+
+    def test_capture_valid_signal(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "repeated-error",
+                                "TypeError in payment.py line 42")
+        assert "error" not in result, result
+        assert result["type"] == "failure"
+        assert "signal:repeated-error" in result["tags"]
+        assert "source:agent" in result["tags"]
+
+    def test_capture_validated_claim_sets_confidence(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "validated-claim",
+                                "JWT signing uses HS256 — confirmed by user")
+        assert result["type"] == "semantic"
+        assert result["confidence"] == 0.7
+
+    def test_capture_confidence_capped_at_0_7(self, repo):
+        """All agent captures must be capped so they never outrank human entries."""
+        from scope_intel.core.mempalace import capture_memory, CAPTURE_SIGNALS
+        for signal in CAPTURE_SIGNALS:
+            result = capture_memory(repo, signal, f"evidence for {signal}")
+            assert "error" not in result or result.get("rate_limited"), result
+            conf = result.get("confidence", 0)  # only semantic has it
+            if conf:
+                assert conf <= 0.7, f"confidence > 0.7 for {signal}"
+
+    def test_capture_unknown_signal_returns_error(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "made-up-signal", "some evidence")
+        assert "error" in result
+
+    def test_capture_dry_run_no_write(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "surprising-fix",
+                                "fixed off-by-one in paginator", dry_run=True)
+        assert result.get("dry_run") is True
+        assert "would_capture" in result
+        remaining = store.read_mempalace(repo)
+        assert len(remaining) == 0  # nothing written
+
+    def test_capture_scope_hints_stored(self, repo):
+        from scope_intel.core.mempalace import capture_memory
+        result = capture_memory(repo, "scope-mismatch",
+                                "feature mismatch detected",
+                                feature="billing", file="src/billing/payment.py")
+        assert result["scope"]["features"] == ["billing"]
+        assert result["scope"]["files"] == ["src/billing/payment.py"]
+
+    def test_capture_rate_limit(self, repo):
+        from scope_intel.core.mempalace import capture_memory, _CAPTURE_RATE_LIMIT
+        # Fill up the rate limit
+        for i in range(_CAPTURE_RATE_LIMIT):
+            r = capture_memory(repo, "repeated-error", f"error #{i}")
+            assert "error" not in r or r.get("rate_limited"), r
+        # Next one should be rate-limited
+        r = capture_memory(repo, "repeated-error", "over the limit")
+        assert r.get("rate_limited") is True
+
+
 class TestMemPalaceList:
     def test_list_all(self, repo):
         add_memory(repo, "bug", "b1", features=["auth"])

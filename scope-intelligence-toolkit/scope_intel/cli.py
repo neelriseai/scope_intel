@@ -28,6 +28,8 @@ from .core.query_engine import (
 from .core.mempalace import (
     add_memory,
     auto_capture_from_git,
+    capture_memory,
+    CAPTURE_SIGNALS,
     compute_churn,
     decay_confidence,
     detect_conflicts,
@@ -802,6 +804,36 @@ def build_parser() -> argparse.ArgumentParser:
     p_mconf.add_argument("--repo", default=".")
     p_mconf.add_argument("--include-resolved", action="store_true")
     p_mconf.add_argument("--json", action="store_true")
+
+    # mem capture  (Phase 6.2) — agent-triggered high-signal capture
+    p_mcap = mem_sub.add_parser(
+        "capture",
+        help=(
+            "Agent-triggered capture: record a high-signal event automatically. "
+            "Confidence is capped at 0.7; rate-limited to 5 per signal per hour."
+        ),
+    )
+    p_mcap.add_argument("--repo", default=".")
+    p_mcap.add_argument(
+        "--signal",
+        required=True,
+        choices=list(CAPTURE_SIGNALS),
+        help=(
+            "Signal type: repeated-error | surprising-fix | validated-claim | "
+            "repeated-lookup | scope-mismatch"
+        ),
+    )
+    p_mcap.add_argument("--evidence", required=True,
+                        help="Text to record (error msg, assertion, etc.).")
+    p_mcap.add_argument("--feature", default=None, help="Feature scope hint.")
+    p_mcap.add_argument("--file", default=None, dest="capture_file",
+                        help="File scope hint.")
+    p_mcap.add_argument("--symbol", default=None, help="Symbol scope hint.")
+    p_mcap.add_argument("--author", default="agent",
+                        help="Agent identifier (default: agent).")
+    p_mcap.add_argument("--dry-run", action="store_true",
+                        help="Preview without writing.")
+    p_mcap.add_argument("--json", action="store_true")
 
     # mem touch  (Phase 6.1) — reinforce a memory by resetting its timestamp
     p_mtouch = mem_sub.add_parser(
@@ -4288,6 +4320,31 @@ def cmd_mem(args) -> int:
         result = detect_conflicts(repo, include_resolved=args.include_resolved)
         _emit(result, args.json, formatter=_fmt_conflicts)
         return 0
+
+    if mc == "capture":
+        result = capture_memory(
+            repo,
+            signal=args.signal,
+            evidence=args.evidence,
+            feature=args.feature,
+            file=args.capture_file,
+            symbol=args.symbol,
+            author=args.author,
+            dry_run=args.dry_run,
+        )
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif result.get("rate_limited"):
+            print(result["error"], file=sys.stderr)
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        elif result.get("dry_run"):
+            print(f"[dry-run] would capture: [{result['would_capture']['type']}] "
+                  f"{result['would_capture']['note'][:80]}")
+        else:
+            print(f"captured [{result['type']}] {result['id']}  "
+                  f"signal={args.signal}  {result['note'][:60]}")
+        return 0 if "error" not in result else 2
 
     if mc == "touch":
         result = touch_memory(repo, args.id)

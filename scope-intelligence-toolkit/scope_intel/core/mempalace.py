@@ -1077,3 +1077,109 @@ def detect_conflicts(
         "total": len(conflicts),
         "semantic_checked": len(semantics),
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 6.2 — Agent-triggered capture
+# ---------------------------------------------------------------------------
+
+#: Valid signal types for capture().  Each maps to a memory type + confidence cap.
+CAPTURE_SIGNALS: dict[str, dict] = {
+    "repeated-error":   {"type": "failure",  "confidence": None,  "cap": 0.7},
+    "surprising-fix":   {"type": "fix",      "confidence": None,  "cap": 0.7},
+    "validated-claim":  {"type": "semantic", "confidence": 0.7,   "cap": 0.7},
+    "repeated-lookup":  {"type": "procedure","confidence": None,   "cap": 0.7},
+    "scope-mismatch":   {"type": "note",     "confidence": None,   "cap": 0.7},
+}
+
+#: Max captures per signal per hour (rate-limit)
+_CAPTURE_RATE_LIMIT = 5
+
+
+def capture_memory(
+    repo_root: Path,
+    signal: str,
+    evidence: str,
+    *,
+    feature: Optional[str] = None,
+    file: Optional[str] = None,
+    symbol: Optional[str] = None,
+    author: str = "agent",
+    dry_run: bool = False,
+) -> dict:
+    """Record an agent-triggered memory capture.
+
+    Agents call this when they detect a high-signal event during a session.
+    Unlike ``add_memory`` (which is human-facing), capture:
+      - Validates against known signal types
+      - Caps confidence at 0.7 so agent entries never outrank human ones
+      - Rate-limits to ``_CAPTURE_RATE_LIMIT`` per signal per hour to prevent spam
+      - Tags the entry as source='agent' for filtering/pruning
+
+    Args:
+        signal:   One of CAPTURE_SIGNALS keys (repeated-error, validated-claim, etc.)
+        evidence: The text to record (e.g. error message, assertion text).
+        feature / file / symbol: Scope hints for routing.
+        author:   Agent identifier (default: "agent").
+        dry_run:  Preview without writing.
+
+    Returns entry dict on success, or {error: ...}.
+    """
+    if not store.is_initialized(repo_root):
+        return {"error": "repo not indexed — run scope init first"}
+
+    if signal not in CAPTURE_SIGNALS:
+        valid = ", ".join(CAPTURE_SIGNALS)
+        return {"error": f"unknown signal '{signal}' — valid: {valid}"}
+
+    sig_meta = CAPTURE_SIGNALS[signal]
+    kind = sig_meta["type"]
+    confidence = sig_meta.get("confidence") or 0.7
+
+    # Rate-limit: count same-signal captures in the last hour
+    cutoff_ts = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ",
+        time.gmtime(time.time() - 3600),
+    )
+    existing = store.read_mempalace(repo_root)
+    recent_same_signal = sum(
+        1 for e in existing
+        if e.get("tags") and f"signal:{signal}" in e["tags"]
+        and e.get("ts", "") >= cutoff_ts
+    )
+    if recent_same_signal >= _CAPTURE_RATE_LIMIT:
+        return {
+            "error": (
+                f"rate limit reached: {_CAPTURE_RATE_LIMIT} '{signal}' captures "
+                f"in the last hour. Try again later or use `scope mem add` directly."
+            ),
+            "rate_limited": True,
+        }
+
+    tags = [f"signal:{signal}", "source:agent"]
+    scope_files = [file] if file else []
+    scope_features = [feature] if feature else []
+    scope_symbols = [symbol] if symbol else []
+
+    entry: dict = {
+        "id":       _make_id(evidence, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+        "ts":       time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "type":     kind,
+        "note":     evidence,
+        "scope": {
+            "files":    scope_files,
+            "features": scope_features,
+            "symbols":  scope_symbols,
+        },
+        "tags":    tags,
+        "author":  author,
+        "resolved": False,
+    }
+    if kind == "semantic":
+        entry["confidence"] = confidence
+
+    if dry_run:
+        return {"dry_run": True, "would_capture": entry}
+
+    store.append_mempalace(repo_root, entry)
+    return entry
