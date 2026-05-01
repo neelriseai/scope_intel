@@ -387,10 +387,16 @@ def probe_file_path(
         "error":            None,
     }
 
-    # Step 1: read locally
+    # Step 1: read locally — use doc_reader adapters so .pdf/.docx produce real text,
+    # not raw binary garbage.  Ollama cannot accept file paths or cloud URLs.
     try:
         from pathlib import Path as _Path
-        text = _Path(path).read_text(encoding="utf-8", errors="replace")[:500]
+        from ..adapters.doc_reader import read_document
+        read_result = read_document(_Path(path))
+        if "error" in read_result:
+            result["error"] = f"local read failed: {read_result['error']}"
+            return result
+        text = read_result["text"][:500]
         result["bytes_sent"] = len(text.encode("utf-8"))
     except Exception as exc:
         result["error"] = f"local read failed: {exc}"

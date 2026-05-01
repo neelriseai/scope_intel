@@ -974,7 +974,9 @@ def _fmt_features_list(payload: dict) -> None:
 def _fmt_feature(s: dict) -> None:
     if "error" in s:
         print(s["error"])
-        if "available" in s:
+        if s.get("suggestions"):
+            print("did you mean: " + ", ".join(s["suggestions"]))
+        elif "available" in s:
             print("available: " + ", ".join(s["available"]))
         return
     f = s["feature"]
@@ -1045,12 +1047,16 @@ def _fmt_symbol(s: dict) -> None:
             print(f"  writes: {', '.join(sym['writes'][:8])}")
         if m.get("callees"):
             print("  calls:")
-            for c in m["callees"][:10]:
+            for c in m["callees"][:25]:
                 print(f"    - {c.get('id') or c.get('name')}  [{c.get('file', '')}]")
+            if len(m["callees"]) > 25:
+                print(f"    ... {len(m['callees']) - 25} more — run `scope callees {sym['id']}` for the full list")
         if m.get("callers"):
             print("  called by:")
-            for c in m["callers"][:10]:
+            for c in m["callers"][:25]:
                 print(f"    - {c['id']}  [{c.get('file', '')}]")
+            if len(m["callers"]) > 25:
+                print(f"    ... {len(m['callers']) - 25} more — run `scope callers {sym['id']}` for the full list")
         print()
 
 
@@ -1302,7 +1308,8 @@ def _fmt_diff(s: dict) -> None:
     print(f"diff vs {s.get('ref')}")
     changed = s.get("changed", [])
     removed = s.get("removed", [])
-    not_indexed = s.get("not_in_index", [])
+    new_unindexed      = s.get("new_unindexed",      s.get("not_in_index", []))
+    modified_unindexed = s.get("modified_unindexed", [])
     print(f"\nchanged ({len(changed)}):")
     for f in changed:
         print(f"  ~ {f}")
@@ -1310,9 +1317,13 @@ def _fmt_diff(s: dict) -> None:
         print(f"\nremoved ({len(removed)}):")
         for f in removed:
             print(f"  - {f}")
-    if not_indexed:
-        print(f"\nnot in index (new files?):")
-        for f in not_indexed:
+    if modified_unindexed:
+        print(f"\nmodified (not yet indexed — run `scope index` to add):")
+        for f in modified_unindexed:
+            print(f"  ~ {f}")
+    if new_unindexed:
+        print(f"\nnew files (not yet indexed — run `scope index` to add):")
+        for f in new_unindexed:
             print(f"  + {f}")
     direct = s.get("direct_impact", [])
     trans = s.get("transitive_impact", [])

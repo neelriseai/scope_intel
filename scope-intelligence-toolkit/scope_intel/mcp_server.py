@@ -20,6 +20,7 @@ from .core.diff import compute_diff_scope
 from .core.mempalace import (
     add_memory,
     auto_capture_from_git,
+    capture_memory,
     compute_churn,
     decay_confidence,
     detect_conflicts,
@@ -27,7 +28,15 @@ from .core.mempalace import (
     fetch_relevant,
     import_memories,
     list_memories,
+    prune_memories,
     search_memories,
+    touch_memory,
+)
+from .core.federation import (
+    federation_add,
+    federation_list,
+    federation_link,
+    federation_remove,
 )
 from .core.query_engine import (
     find_impacted_files,
@@ -882,6 +891,76 @@ TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "name": "mem_capture",
+        "description": (
+            "Agent-triggered memory capture. Records a high-signal event detected during a session. "
+            "Caps confidence at 0.7 and rate-limits to prevent spam. "
+            "Valid signals: repeated-error, validated-claim, perf-regression, security-note, arch-decision."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "signal":   {"type": "string", "description": "Signal type (e.g. repeated-error, validated-claim)."},
+                "evidence": {"type": "string", "description": "Text to record as the memory note."},
+                "feature":  {"type": "string", "description": "Feature scope hint (optional)."},
+                "file":     {"type": "string", "description": "File scope hint (optional)."},
+                "symbol":   {"type": "string", "description": "Symbol scope hint (optional)."},
+                "author":   {"type": "string", "default": "agent"},
+                "dry_run":  {"type": "boolean", "default": False},
+            },
+            "required": ["signal", "evidence"],
+        },
+    },
+    {
+        "name": "mem_touch",
+        "description": "Reinforce a memory by refreshing its timestamp. Resets decay so effective confidence jumps back to its base value.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "id": {"type": "string", "description": "Memory ID to touch."},
+            },
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "mem_prune",
+        "description": "Delete semantic memories whose effective confidence has decayed below a threshold. Non-semantic entries are never pruned.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "below":          {"type": "number", "default": 0.2, "description": "Prune entries with effective_confidence below this value."},
+                "dry_run":        {"type": "boolean", "default": False},
+                "half_life_days": {"type": "integer", "description": "Override the repo default half-life (optional)."},
+            },
+        },
+    },
+    {
+        "name": "mem_federation",
+        "description": (
+            "Manage the cross-repo federation registry. "
+            "action='list' returns all repos and links. "
+            "action='add' registers a new repo. "
+            "action='remove' deregisters a repo. "
+            "action='link' creates a directional memory link between two repos."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "add", "remove", "link"],
+                           "description": "Operation to perform."},
+                "path":   {"type": "string", "description": "Repo path (required for action=add)."},
+                "alias":  {"type": "string", "description": "Repo alias (required for action=add/remove/link)."},
+                "to":     {"type": "string", "description": "Target alias (required for action=link)."},
+                "scope":  {"type": "string", "default": "all",
+                           "description": "Memory scope for link: all | semantic | procedure | episodic."},
+            },
+            "required": ["action"],
+        },
+    },
 ]
 
 
@@ -968,6 +1047,44 @@ def _call_tool(name: str, arguments: dict) -> dict:
         )
     if name == "mem_churn":
         return compute_churn(repo, days=arguments.get("days", 90))
+    if name == "mem_capture":
+        return capture_memory(
+            repo,
+            arguments["signal"],
+            arguments["evidence"],
+            feature=arguments.get("feature"),
+            file=arguments.get("file"),
+            symbol=arguments.get("symbol"),
+            author=arguments.get("author", "agent"),
+            dry_run=arguments.get("dry_run", False),
+        )
+    if name == "mem_touch":
+        return touch_memory(repo, arguments["id"])
+    if name == "mem_prune":
+        return prune_memories(
+            repo,
+            below=arguments.get("below", 0.2),
+            dry_run=arguments.get("dry_run", False),
+            half_life_days=arguments.get("half_life_days"),
+        )
+    if name == "mem_federation":
+        action = arguments.get("action", "list")
+        if action == "list":
+            return federation_list()
+        if action == "add":
+            if not arguments.get("path") or not arguments.get("alias"):
+                return {"error": "action=add requires 'path' and 'alias'"}
+            return federation_add(arguments["path"], arguments["alias"])
+        if action == "remove":
+            if not arguments.get("alias"):
+                return {"error": "action=remove requires 'alias'"}
+            return federation_remove(arguments["alias"])
+        if action == "link":
+            if not arguments.get("alias") or not arguments.get("to"):
+                return {"error": "action=link requires 'alias' (from) and 'to'"}
+            return federation_link(arguments["alias"], arguments["to"],
+                                   scope=arguments.get("scope", "all"))
+        return {"error": f"unknown action '{action}' — valid: list, add, remove, link"}
 
     # --- Doc ingest / list / fetch ---
     if name == "doc_ingest":
