@@ -462,6 +462,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_snap_del.add_argument("--repo", default=".")
     p_snap_del.add_argument("--json", action="store_true")
 
+    # doc report — full markdown health dashboard of .ai-context/ system
+    p_drep = doc_sub.add_parser(
+        "report",
+        help=(
+            "Generate a markdown dashboard summarising the entire .ai-context/ state: "
+            "file inventory, pin/annotation status, snapshots, token budget, and health."
+        ),
+    )
+    p_drep.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_drep.add_argument(
+        "--output", default="-", metavar="FILE",
+        help="Output file path. Use '-' for stdout (default: -).",
+    )
+    p_drep.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc diff — show files manually edited since last ingest
     p_ddiff = doc_sub.add_parser(
         "diff",
@@ -1893,6 +1908,167 @@ def _fmt_doc_diff_since(r: dict) -> None:
         print(f"\n  All {r['total_checked']} file(s) unchanged since snapshot.")
 
 
+def _doc_report(repo: Path) -> dict:
+    """Produce a comprehensive dict summarising the entire .ai-context/ state.
+
+    Aggregates: file list, pin status, annotation counts, snapshot inventory,
+    token budget, health check result, and source doc info.
+
+    Designed to be called as a single MCP call before starting work on a feature.
+    """
+    import time as _time
+
+    report: dict = {
+        "generated_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        "repo":         str(repo),
+    }
+
+    ai_ctx = repo / ".ai-context"
+    if not ai_ctx.exists():
+        report["error"] = "no .ai-context/ found — run `scope doc ingest` first"
+        return report
+
+    # --- index info ---
+    index_path = ai_ctx / "generated" / "index.json"
+    source = "?"; generated_at = "?"; mode = "?"; source_hash = ""
+    index_files: list[dict] = []
+    pinned_set: set[str] = set()
+    if index_path.exists():
+        try:
+            idx = json.loads(index_path.read_text(encoding="utf-8"))
+            source       = idx.get("source", "?")
+            generated_at = idx.get("generated_at", "?")
+            mode         = idx.get("mode", "?")
+            source_hash  = idx.get("source_hash", "")
+            index_files  = idx.get("files", [])
+            pinned_set   = set(idx.get("pinned_files", []))
+        except Exception:  # noqa: BLE001
+            pass
+
+    report["source"] = source
+    report["ingested_at"] = generated_at
+    report["mode"] = mode
+
+    # --- file inventory ---
+    stats = _doc_stats(repo)
+    all_files: list[dict] = []
+    ann_data = _load_annotations(repo)
+
+    for f in stats.get("generated", []) + stats.get("curated", []):
+        # Annotation count: generated from index_files; curated from ann_data
+        ann_count = 0
+        for entry in index_files:
+            if entry.get("path") == f["path"]:
+                ann_count = len(entry.get("annotations", []))
+                break
+        ann_count += len(ann_data.get(f["path"], []))
+
+        all_files.append({
+            "id":      f["id"],
+            "path":    f["path"],
+            "layer":   f["layer"],
+            "chars":   f["chars"],
+            "tokens":  f["tokens"],
+            "pinned":  f["path"] in pinned_set,
+            "annotations": ann_count,
+        })
+
+    report["files"] = all_files
+    report["total_files"]  = len(all_files)
+    report["total_chars"]  = stats.get("total_chars", 0)
+    report["total_tokens"] = stats.get("total_tokens", 0)
+    report["pinned_count"] = len(pinned_set)
+
+    # --- snapshots ---
+    snap_list = _doc_snapshot_list(repo)
+    report["snapshots"] = snap_list.get("snapshots", [])
+    report["total_snapshots"] = snap_list.get("total", 0)
+
+    # --- health ---
+    health = _doc_check(repo)
+    report["healthy"]        = health.get("healthy", False)
+    report["health_errors"]  = health.get("errors", 0)
+    report["health_warnings"]= health.get("warnings", 0)
+    report["health_issues"]  = health.get("issues", [])
+    report["doc_changed"]    = health.get("doc_changed", False)
+
+    # --- context budget hint ---
+    tok = report["total_tokens"]
+    if tok < 8_000:
+        budget_hint = "fits in 8k context"
+    elif tok < 32_000:
+        budget_hint = "fits in 32k context"
+    elif tok < 128_000:
+        budget_hint = "fits in 128k context"
+    else:
+        budget_hint = "⚠ exceeds 128k — use selective fetch"
+    report["budget_hint"] = budget_hint
+
+    return report
+
+
+def _fmt_doc_report(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+
+    health_sym = "✓" if r["healthy"] else \
+                 "⚠" if r["health_errors"] == 0 else "✗"
+    print(f"# .ai-context/ Report — {r['source']}")
+    print(f"  ingested: {r['ingested_at']}  mode: {r['mode']}")
+    print(f"  health: {health_sym}  "
+          f"errors={r['health_errors']}  warnings={r['health_warnings']}")
+    print(f"  budget: {r['total_chars']:,} chars  ~{r['total_tokens']:,} tok  "
+          f"({r['budget_hint']})")
+    if r.get("doc_changed"):
+        print("  ⚠ source doc changed since last ingest — run `scope doc rebuild`")
+    print()
+
+    # File table
+    print(f"{'id':<40}  {'layer':<10}  {'chars':>7}  {'~tok':>6}  flags")
+    print(f"{'─'*40}  {'─'*10}  {'─'*7}  {'─'*6}  {'─'*10}")
+    for f in r.get("files", []):
+        flags: list[str] = []
+        if f["pinned"]:       flags.append("📌")
+        if f["annotations"]:  flags.append(f"✎×{f['annotations']}")
+        flag_str = "  ".join(flags)
+        print(f"  {f['id']:<38}  {f['layer']:<10}  {f['chars']:>7,}  "
+              f"{f['tokens']:>6,}  {flag_str}")
+
+    # Snapshots
+    snaps = r.get("snapshots", [])
+    if snaps:
+        print(f"\nsnapshots ({r['total_snapshots']}):")
+        for s in snaps:
+            print(f"  {s['name']:<25} {s['created_at']}  ({s['total_files']} files)")
+    else:
+        print("\nno snapshots — create one with: scope doc snapshot save <name>")
+
+    # Health issues
+    issues = r.get("health_issues", [])
+    if issues:
+        print(f"\nhealth issues ({len(issues)}):")
+        for issue in issues:
+            sym = "✗" if issue["level"] == "error" else "⚠"
+            print(f"  {sym} {issue['file']}: {issue['msg']}")
+
+    print(f"\n  {r['total_files']} files  {r['pinned_count']} pinned  "
+          f"{r['total_snapshots']} snapshots  "
+          f"generated {r['generated_at']}")
+
+
+def _fmt_doc_report_to_str(r: dict) -> str:
+    """Render the doc report as a markdown string (for --output <file>)."""
+    import io as _io
+    buf = _io.StringIO()
+    old_stdout = __import__("sys").stdout
+    __import__("sys").stdout = buf
+    try:
+        _fmt_doc_report(r)
+    finally:
+        __import__("sys").stdout = old_stdout
+    return buf.getvalue()
+
+
 def _read_pinned(repo: Path) -> set[str]:
     """Read the set of pinned file paths from index.json (returns empty set if absent)."""
     index_path = repo / ".ai-context" / "generated" / "index.json"
@@ -2986,6 +3162,21 @@ def cmd_doc(args) -> int:
             clear=getattr(args, "clear", False),
         )
         _emit(result, args.json, formatter=_fmt_doc_annotate)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "report":
+        repo = _resolve_repo(args.repo)
+        result = _doc_report(repo)
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        elif "error" in result:
+            print(result["error"], file=sys.stderr)
+        elif args.output == "-":
+            _fmt_doc_report(result)
+        else:
+            out = Path(args.output)
+            out.write_text(_fmt_doc_report_to_str(result), encoding="utf-8")
+            print(f"report written to {out}", file=sys.stderr)
         return 0 if "error" not in result else 2
 
     if args.doc_cmd == "snapshot":

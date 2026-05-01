@@ -1897,3 +1897,80 @@ class TestDocSnapshot:
         result = _doc_snapshot_list(repo)
         assert result["snapshots"] == []
         assert result["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# TestDocReport
+# ---------------------------------------------------------------------------
+
+class TestDocReport:
+    """Tests for _doc_report — comprehensive .ai-context/ dashboard."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def test_no_ai_context_returns_error(self, repo):
+        from scope_intel.cli import _doc_report
+        result = _doc_report(repo)
+        assert "error" in result
+
+    def test_report_returns_expected_keys(self, repo, md_file):
+        from scope_intel.cli import _doc_report
+        self._ingest(repo, md_file)
+        result = _doc_report(repo)
+        assert "error" not in result
+        for key in ("source", "ingested_at", "mode", "files", "total_files",
+                    "total_chars", "total_tokens", "healthy", "budget_hint",
+                    "pinned_count", "snapshots", "total_snapshots"):
+            assert key in result, f"missing key: {key}"
+
+    def test_total_files_matches_file_list(self, repo, md_file):
+        from scope_intel.cli import _doc_report
+        self._ingest(repo, md_file)
+        result = _doc_report(repo)
+        assert result["total_files"] == len(result["files"])
+
+    def test_pinned_count_reflects_pins(self, repo, md_file):
+        from scope_intel.cli import _doc_report
+        self._ingest(repo, md_file)
+        # Pin one file
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        fid = idx["files"][0]["id"]
+        _doc_pin(repo, fid)
+
+        result = _doc_report(repo)
+        assert result["pinned_count"] == 1
+        pinned_in_list = [f for f in result["files"] if f["pinned"]]
+        assert len(pinned_in_list) == 1
+
+    def test_annotation_count_in_file_entry(self, repo, md_file):
+        from scope_intel.cli import _doc_report
+        self._ingest(repo, md_file)
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        fid = idx["files"][0]["id"]
+        _doc_annotate(repo, fid, add_note="Test note 1")
+        _doc_annotate(repo, fid, add_note="Test note 2")
+
+        result = _doc_report(repo)
+        annotated = [f for f in result["files"] if f["annotations"] > 0]
+        assert annotated, "expected at least one file with annotations > 0"
+        assert annotated[0]["annotations"] == 2
+
+    def test_snapshots_included_in_report(self, repo, md_file):
+        from scope_intel.cli import _doc_report, _doc_snapshot_save
+        self._ingest(repo, md_file)
+        _doc_snapshot_save(repo, "v1")
+        result = _doc_report(repo)
+        assert result["total_snapshots"] == 1
+        assert result["snapshots"][0]["name"] == "v1"
+
+    def test_budget_hint_present(self, repo, md_file):
+        from scope_intel.cli import _doc_report
+        self._ingest(repo, md_file)
+        result = _doc_report(repo)
+        assert result["budget_hint"]
+        assert "context" in result["budget_hint"].lower()

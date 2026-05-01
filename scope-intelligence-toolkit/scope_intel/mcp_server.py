@@ -504,6 +504,19 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_report",
+        "description": (
+            "Generate a comprehensive status report of the entire .ai-context/ system: "
+            "file inventory with token counts, pin/annotation flags, snapshot list, "
+            "health check summary, and context budget hint. "
+            "Call this once at session start to orient Claude before working on a feature."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": _REPO_PROP,
+        },
+    },
+    {
         "name": "doc_snapshot_save",
         "description": (
             "Save a named point-in-time snapshot of all .ai-context/ file content hashes. "
@@ -1046,6 +1059,10 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_templates_created": total_tmpl,
             "results":                 results,
         }
+
+    if name == "doc_report":
+        from .cli import _doc_report
+        return _doc_report(repo)
 
     if name == "doc_snapshot_save":
         from .cli import _doc_snapshot_save
