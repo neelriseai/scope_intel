@@ -408,6 +408,19 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_check",
+        "description": (
+            "Validate the .ai-context/ directory health: checks index.json integrity, "
+            "verifies every indexed file exists on disk, flags files that are suspiciously "
+            "short, detects unfilled TODO placeholders in curated files, and warns if "
+            "the source document has changed since the last ingest run."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": _REPO_PROP,
+        },
+    },
+    {
         "name": "doc_ingest_batch",
         "description": (
             "Ingest all design documents (PDF/DOCX/MD/TXT) in a directory, "
@@ -782,6 +795,10 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_matches": sum(r["match_count"] for r in results),
             "results": results,
         }
+
+    if name == "doc_check":
+        from .cli import _doc_check
+        return _doc_check(repo)
 
     if name == "doc_ingest_batch":
         from .core.doc_ingestor import ingest_document as _ingest

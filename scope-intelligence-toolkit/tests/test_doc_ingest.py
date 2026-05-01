@@ -1087,6 +1087,94 @@ class TestDocExport:
 
 
 # ---------------------------------------------------------------------------
+# doc check — health validation
+# ---------------------------------------------------------------------------
+
+class TestDocCheck:
+    """Test the _doc_check() health validator."""
+
+    def test_check_no_ai_context_returns_error(self, repo):
+        from scope_intel.cli import _doc_check
+        result = _doc_check(repo)
+        assert "error" in result
+
+    def test_check_after_ingest_is_healthy_or_warns(self, repo, md_file):
+        from scope_intel.cli import _doc_check
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_check(repo)
+        assert "error" not in result
+        # "errors" key is always present
+        assert "errors" in result
+        assert "warnings" in result
+        assert isinstance(result["healthy"], bool)
+
+    def test_check_result_has_required_keys(self, repo, md_file):
+        from scope_intel.cli import _doc_check
+        ingest_document(repo, md_file, overwrite=True)
+        result = _doc_check(repo)
+        for key in ("source", "generated_at", "mode", "errors", "warnings",
+                    "issues", "passes", "generated_files", "curated_files"):
+            assert key in result
+
+    def test_check_detects_missing_generated_file(self, repo, md_file):
+        from scope_intel.cli import _doc_check
+        ingest_document(repo, md_file, overwrite=True)
+        # Delete one generated file but leave index.json intact
+        gen_dir = repo / ".ai-context" / "generated"
+        mds = list(gen_dir.glob("*.md"))
+        if mds:
+            mds[0].unlink()
+            result = _doc_check(repo)
+            # Should have at least one error (missing file)
+            assert result["errors"] > 0
+            error_files = [i["file"] for i in result["issues"] if i["level"] == "error"]
+            assert any(mds[0].name in f for f in error_files)
+
+    def test_check_detects_todo_placeholders_in_curated(self, repo, md_file):
+        from scope_intel.cli import _doc_check
+        ingest_document(repo, md_file, overwrite=True)
+        # Overwrite current-phase.md with template-style content containing TODO
+        cur_dir = repo / ".ai-context" / "curated"
+        cur_dir.mkdir(parents=True, exist_ok=True)
+        (cur_dir / "current-phase.md").write_text(
+            "# Current Phase\n\n- TODO: fill this in\n", encoding="utf-8"
+        )
+        result = _doc_check(repo)
+        # Should warn about TODO placeholder
+        warn_msgs = [i["msg"] for i in result["issues"] if "TODO" in i["msg"]]
+        assert warn_msgs
+
+    def test_check_passes_clean_content(self, repo, md_file):
+        from scope_intel.cli import _doc_check
+        ingest_document(repo, md_file, overwrite=True)
+        # Write clean curated files (no TODO)
+        cur_dir = repo / ".ai-context" / "curated"
+        cur_dir.mkdir(parents=True, exist_ok=True)
+        for fname in ("current-phase.md", "module-map.md"):
+            p = cur_dir / fname
+            if not p.exists():
+                p.write_text(f"# {fname}\n\nClean content with no placeholders.\n",
+                             encoding="utf-8")
+        result = _doc_check(repo)
+        # Passes list should be non-empty (at least generated files pass)
+        assert len(result["passes"]) > 0
+
+    def test_check_curated_missing_flagged_as_warning(self, repo, md_file):
+        from scope_intel.cli import _doc_check
+        # Use a doc with no curated-routable sections → curated files only from templates
+        # Then manually delete one template
+        ingest_document(repo, md_file, overwrite=True)
+        cur_dir = repo / ".ai-context" / "curated"
+        module_map = cur_dir / "module-map.md"
+        if module_map.exists():
+            module_map.unlink()
+        result = _doc_check(repo)
+        # module-map.md missing should appear as a warning
+        warn_files = [i["file"] for i in result["issues"] if i["level"] == "warn"]
+        assert any("module-map" in f for f in warn_files)
+
+
+# ---------------------------------------------------------------------------
 # ingest-batch (tested via multiple sequential ingest_document calls)
 # ---------------------------------------------------------------------------
 

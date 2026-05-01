@@ -249,6 +249,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show what would be removed without deleting anything.",
     )
 
+    # doc check — health validation
+    p_check = doc_sub.add_parser(
+        "check",
+        help="Validate .ai-context/ structure and flag issues (missing files, TODO placeholders, thin content).",
+    )
+    p_check.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_check.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
     # doc ingest-batch — ingest all docs in a directory
     p_ibatch = doc_sub.add_parser(
         "ingest-batch",
@@ -1252,6 +1260,175 @@ def _fmt_ingest(r: dict) -> None:
             print(f"  {trunc:<{col1}}  → {dr['dest']}{via_tag}{dr['hint_str']}")
 
 
+def _doc_check(repo: Path) -> dict:
+    """Validate the .ai-context/ directory and return a structured health report.
+
+    Checks:
+      - index.json present and parseable
+      - every file listed in index.json exists on disk
+      - no generated file is suspiciously short (< MIN_CHARS)
+      - all three curated files exist (not just templates)
+      - curated files have no unfilled TODO placeholders
+      - source doc hash status (changed since last ingest?)
+    """
+    import re as _re
+    ai_ctx = repo / ".ai-context"
+    if not ai_ctx.exists():
+        return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
+
+    MIN_CHARS = 120   # files shorter than this are flagged
+    TODO_RE   = _re.compile(r"\bTODO\b")
+
+    issues: list[dict] = []   # {"level": "warn"|"error", "file": path, "msg": str}
+    passes: list[str]  = []   # brief descriptions of checks that passed
+
+    # --- index.json ---
+    index_path = ai_ctx / "generated" / "index.json"
+    source = "?"; source_hash = ""; generated_at = "?"; mode = "?"
+    index_files: list[dict] = []
+
+    if not index_path.exists():
+        issues.append({"level": "error", "file": ".ai-context/generated/index.json",
+                       "msg": "index.json missing — run `scope doc ingest`"})
+    else:
+        try:
+            idx = json.loads(index_path.read_text(encoding="utf-8"))
+            source       = idx.get("source", "?")
+            source_hash  = idx.get("source_hash", "")
+            generated_at = idx.get("generated_at", "?")
+            mode         = idx.get("mode", "?")
+            index_files  = idx.get("files", [])
+            passes.append(f"index.json valid  ({len(index_files)} files  mode={mode}  source={source})")
+        except Exception as exc:  # noqa: BLE001
+            issues.append({"level": "error", "file": ".ai-context/generated/index.json",
+                           "msg": f"index.json unreadable: {exc}"})
+
+    # --- check each file in index ---
+    file_reports: list[dict] = []
+    for entry in index_files:
+        rel  = entry.get("path", "")
+        fpath = repo / rel
+        fd: dict = {"path": rel, "layer": entry.get("layer", "?"),
+                    "title": entry.get("title", ""), "issues": []}
+        if not fpath.exists():
+            fd["issues"].append({"level": "error", "msg": "file missing on disk"})
+            issues.append({"level": "error", "file": rel,
+                           "msg": "listed in index.json but missing on disk"})
+        else:
+            try:
+                content = fpath.read_text(encoding="utf-8")
+                fd["chars"] = len(content)
+                if len(content) < MIN_CHARS:
+                    fd["issues"].append({"level": "warn",
+                                         "msg": f"very short ({len(content)} chars) — may be missing content"})
+                    issues.append({"level": "warn", "file": rel,
+                                   "msg": f"very short ({len(content)} chars)"})
+                else:
+                    passes.append(f"{rel}  ({len(content):,} chars)")
+            except OSError as exc:
+                fd["issues"].append({"level": "error", "msg": f"unreadable: {exc}"})
+                issues.append({"level": "error", "file": rel, "msg": str(exc)})
+        file_reports.append(fd)
+
+    # --- curated files ---
+    CURATED_EXPECTED = ["constraints.md", "current-phase.md", "module-map.md"]
+    cur_dir = ai_ctx / "curated"
+    curated_reports: list[dict] = []
+    for fname in CURATED_EXPECTED:
+        fpath = cur_dir / fname
+        rel   = f".ai-context/curated/{fname}"
+        cd: dict = {"path": rel, "layer": "curated", "issues": []}
+        if not fpath.exists():
+            cd["issues"].append({"level": "warn",
+                                  "msg": "missing — create manually or re-run ingest"})
+            issues.append({"level": "warn", "file": rel,
+                           "msg": "curated file missing (run ingest to create template)"})
+        else:
+            try:
+                content = fpath.read_text(encoding="utf-8")
+                cd["chars"] = len(content)
+                todo_count = len(TODO_RE.findall(content))
+                if todo_count:
+                    cd["issues"].append({"level": "warn",
+                                          "msg": f"contains {todo_count} unfilled TODO placeholder(s)"})
+                    issues.append({"level": "warn", "file": rel,
+                                   "msg": f"{todo_count} unfilled TODO placeholder(s)"})
+                else:
+                    passes.append(f"{rel}  ({len(content):,} chars)")
+            except OSError as exc:
+                cd["issues"].append({"level": "error", "msg": f"unreadable: {exc}"})
+                issues.append({"level": "error", "file": rel, "msg": str(exc)})
+        curated_reports.append(cd)
+
+    # --- source doc changed? (best-effort) ---
+    doc_changed = False
+    if source_hash and source != "?":
+        for candidate in [repo / source,
+                          repo / "docs" / source,
+                          repo / "design" / source]:
+            if candidate.exists():
+                from .core.doc_ingestor import _doc_hash as _dh
+                current_hash = _dh(candidate)
+                if current_hash and current_hash != source_hash:
+                    doc_changed = True
+                    issues.append({"level": "warn", "file": source,
+                                   "msg": "source doc changed since last ingest — run `scope doc rebuild`"})
+                break
+
+    errors  = sum(1 for i in issues if i["level"] == "error")
+    warns   = sum(1 for i in issues if i["level"] == "warn")
+    healthy = errors == 0 and warns == 0
+
+    return {
+        "healthy":       healthy,
+        "source":        source,
+        "source_hash":   source_hash,
+        "generated_at":  generated_at,
+        "mode":          mode,
+        "doc_changed":   doc_changed,
+        "errors":        errors,
+        "warnings":      warns,
+        "issues":        issues,
+        "passes":        passes,
+        "generated_files": file_reports,
+        "curated_files":   curated_reports,
+    }
+
+
+def _fmt_doc_check(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+
+    status = "✓ healthy" if r["healthy"] else \
+             f"⚠ {r['warnings']} warning(s)" if r["errors"] == 0 else \
+             f"✗ {r['errors']} error(s)  {r['warnings']} warning(s)"
+    print(f"scope doc check — {status}")
+    print(f"  source:       {r['source']}  (ingested: {r['generated_at']}  mode: {r['mode']})")
+    if r.get("doc_changed"):
+        print("  ⚠ source doc has changed since last ingest — run `scope doc rebuild`")
+    print()
+
+    all_files = r.get("generated_files", []) + r.get("curated_files", [])
+    for fd in all_files:
+        if fd.get("issues"):
+            for issue in fd["issues"]:
+                sym = "✗" if issue["level"] == "error" else "⚠"
+                print(f"  {sym} {fd['path']}")
+                print(f"      {issue['msg']}")
+        else:
+            chars = f"  ({fd.get('chars', 0):,} chars)" if "chars" in fd else ""
+            print(f"  ✓ {fd['path']}{chars}")
+
+    if r["healthy"]:
+        print(f"\n  All {len(all_files)} file(s) look good.")
+    else:
+        print(f"\n  {r['errors']} error(s)  {r['warnings']} warning(s)")
+        if r["errors"]:
+            print("  → fix errors first: re-run `scope doc ingest` or create missing files")
+        if r["warnings"]:
+            print("  → warnings: edit curated files to replace TODO placeholders")
+
+
 def _fmt_batch_ingest(r: dict) -> None:
     if "error" in r:
         print(r["error"]); return
@@ -1686,6 +1863,12 @@ def cmd_doc(args) -> int:
         )
         _emit(result, args.json, formatter=_fmt_ingest)
         return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "check":
+        repo = _resolve_repo(args.repo)
+        result = _doc_check(repo)
+        _emit(result, args.json, formatter=_fmt_doc_check)
+        return 0 if "error" not in result and result.get("errors", 0) == 0 else 2
 
     if args.doc_cmd == "ingest-batch":
         repo = _resolve_repo(args.repo)
