@@ -472,6 +472,39 @@ def build_parser() -> argparse.ArgumentParser:
     p_copy.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
     p_copy.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
+    # doc ingest-watch — poll a directory and auto-ingest changed files
+    p_iwatch = doc_sub.add_parser(
+        "ingest-watch",
+        help=(
+            "Poll a directory for .md/.txt/.rst changes and auto-ingest them. "
+            "Uses mtime + source-hash dedup. Pass --once for a single sweep."
+        ),
+    )
+    p_iwatch.add_argument("directory", help="Directory to watch.")
+    p_iwatch.add_argument(
+        "--glob", default="*.md,*.txt,*.rst",
+        help="Comma-separated patterns to match (default: *.md,*.txt,*.rst).",
+    )
+    p_iwatch.add_argument(
+        "--interval", type=float, default=2.0,
+        help="Seconds between sweeps (default: 2.0). Ignored when --once is set.",
+    )
+    p_iwatch.add_argument(
+        "--once", action="store_true",
+        help="Run a single sweep then exit (useful for cron / CI).",
+    )
+    p_iwatch.add_argument(
+        "--mode", choices=["python", "llm"], default="python",
+        help="Extraction mode (default: python).",
+    )
+    p_iwatch.add_argument(
+        "--no-overwrite", action="store_true",
+        help="Pass overwrite=False to ingest (skip files that already produced output).",
+    )
+    p_iwatch.add_argument("--dry-run", action="store_true", help="Don't write files.")
+    p_iwatch.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_iwatch.add_argument("--json", action="store_true", help="Emit raw JSON per sweep.")
+
     # doc touch — one-shot 'needs review' annotation wrapper
     p_touch = doc_sub.add_parser(
         "touch",
@@ -3413,6 +3446,91 @@ def _doc_rename(repo: Path, old_name: str, new_name: str) -> dict:
     }
 
 
+def _doc_ingest_watch_tick(
+    repo: Path,
+    watch_dir: Path,
+    state: dict[str, float],
+    *,
+    glob_patterns: tuple[str, ...] = ("*.md", "*.txt", "*.rst"),
+    mode: str = "python",
+    overwrite: bool = True,
+    dry_run: bool = False,
+) -> dict:
+    """One sweep over watch_dir: ingest any new or modified files; update state.
+
+    Args:
+        state: mutated in place — maps relpath → last-seen mtime.
+
+    Returns {scanned, ingested[], skipped[], errors[]} where each list contains
+    per-file dicts.
+    """
+    if not watch_dir.is_dir():
+        return {"error": f"not a directory: {watch_dir}"}
+
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+    for pat in glob_patterns:
+        for p in sorted(watch_dir.glob(pat)):
+            if p.is_file() and p not in seen:
+                seen.add(p)
+                candidates.append(p)
+
+    ingested: list[dict] = []
+    skipped:  list[dict] = []
+    errors:   list[dict] = []
+
+    for p in candidates:
+        rel = str(p.resolve())
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            continue
+
+        prev = state.get(rel)
+        if prev is not None and abs(prev - mtime) < 1e-6:
+            skipped.append({"path": rel, "reason": "unchanged-mtime"})
+            continue
+
+        # File is new or modified — ingest with --if-changed so the doc-hash
+        # layer dedups when mtime changed but content didn't.
+        try:
+            res = ingest_document(
+                repo,
+                p,
+                overwrite=overwrite,
+                dry_run=dry_run,
+                update_claude_md=False,
+                mode=mode,
+                if_changed=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"path": rel, "error": str(exc)})
+            continue
+
+        if "error" in res:
+            errors.append({"path": rel, "error": res["error"]})
+            continue
+
+        # Always update state on a successful sweep — even if doc-hash skip
+        # fired, we don't want to keep retrying every tick.
+        state[rel] = mtime
+        if res.get("unchanged"):
+            skipped.append({"path": rel, "reason": "unchanged-content"})
+        else:
+            ingested.append({
+                "path":           rel,
+                "files_written":  res.get("files_written", 0),
+                "memories_added": res.get("memories_added", 0),
+            })
+
+    return {
+        "scanned":  len(candidates),
+        "ingested": ingested,
+        "skipped":  skipped,
+        "errors":   errors,
+    }
+
+
 def _doc_touch(
     repo: Path,
     name: str,
@@ -3926,6 +4044,63 @@ def cmd_doc(args) -> int:
         result = _doc_touch(repo, args.name, reason=args.reason, author=args.author)
         _emit(result, args.json, formatter=_fmt_doc_annotate)
         return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "ingest-watch":
+        import time as _time
+        repo = _resolve_repo(args.repo)
+        watch_dir = Path(args.directory).resolve()
+        if not watch_dir.is_dir():
+            print(f"error: {watch_dir} is not a directory", file=sys.stderr)
+            return 2
+
+        glob_patterns = tuple(p.strip() for p in args.glob.split(",") if p.strip())
+        state: dict[str, float] = {}
+
+        def _run_sweep(sweep_idx: int) -> dict:
+            res = _doc_ingest_watch_tick(
+                repo, watch_dir, state,
+                glob_patterns=glob_patterns,
+                mode=args.mode,
+                overwrite=not args.no_overwrite,
+                dry_run=args.dry_run,
+            )
+            if args.json:
+                print(json.dumps({"sweep": sweep_idx, **res}, ensure_ascii=False))
+            else:
+                if "error" in res:
+                    print(res["error"], file=sys.stderr)
+                else:
+                    n_in = len(res["ingested"]); n_sk = len(res["skipped"]); n_er = len(res["errors"])
+                    if n_in or n_er or sweep_idx == 1:
+                        print(f"  sweep {sweep_idx}: scanned={res['scanned']}  "
+                              f"ingested={n_in}  skipped={n_sk}  errors={n_er}",
+                              file=sys.stderr)
+                    for entry in res["ingested"]:
+                        print(f"    + {Path(entry['path']).name}  "
+                              f"files_written={entry['files_written']}",
+                              file=sys.stderr)
+                    for entry in res["errors"]:
+                        print(f"    ! {Path(entry['path']).name}: {entry['error']}",
+                              file=sys.stderr)
+            return res
+
+        if not args.json:
+            print(f"watching {watch_dir}  glob={args.glob}  "
+                  f"interval={args.interval}s  mode={args.mode}",
+                  file=sys.stderr)
+
+        sweep_idx = 0
+        try:
+            while True:
+                sweep_idx += 1
+                _run_sweep(sweep_idx)
+                if args.once:
+                    return 0
+                _time.sleep(max(0.05, args.interval))
+        except KeyboardInterrupt:
+            if not args.json:
+                print(f"\nstopped after {sweep_idx} sweep(s).", file=sys.stderr)
+            return 0
 
     print(f"unknown doc subcommand: {args.doc_cmd}", file=sys.stderr)
     return 2

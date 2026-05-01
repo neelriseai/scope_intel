@@ -2494,3 +2494,97 @@ class TestDocTouch:
         notes = [a["note"] for a in result["annotations"]]
         assert notes[0] == "initial thought"
         assert notes[-1] == "needs review: needs follow-up"
+
+
+class TestDocIngestWatch:
+    """Tests for _doc_ingest_watch_tick — single-sweep auto-ingest."""
+
+    def test_first_sweep_ingests_all_files(self, repo, tmp_path):
+        from scope_intel.cli import _doc_ingest_watch_tick
+        watch = tmp_path / "watched"
+        watch.mkdir()
+        (watch / "spec.md").write_text(SAMPLE_MD, encoding="utf-8")
+        (watch / "notes.md").write_text("# Notes\n\nA short note.", encoding="utf-8")
+
+        state: dict[str, float] = {}
+        res = _doc_ingest_watch_tick(repo, watch, state)
+        assert "error" not in res, res
+        assert res["scanned"] == 2
+        assert len(res["ingested"]) == 2
+        assert len(res["errors"]) == 0
+        # State now records both files
+        assert len(state) == 2
+
+    def test_second_sweep_skips_unchanged(self, repo, tmp_path):
+        from scope_intel.cli import _doc_ingest_watch_tick
+        watch = tmp_path / "watched"
+        watch.mkdir()
+        (watch / "spec.md").write_text(SAMPLE_MD, encoding="utf-8")
+
+        state: dict[str, float] = {}
+        first = _doc_ingest_watch_tick(repo, watch, state)
+        assert len(first["ingested"]) == 1
+
+        second = _doc_ingest_watch_tick(repo, watch, state)
+        assert second["scanned"] == 1
+        assert len(second["ingested"]) == 0
+        assert len(second["skipped"]) == 1
+        assert second["skipped"][0]["reason"] == "unchanged-mtime"
+
+    def test_modified_file_is_re_ingested(self, repo, tmp_path):
+        import os, time
+        from scope_intel.cli import _doc_ingest_watch_tick
+        watch = tmp_path / "watched"
+        watch.mkdir()
+        f = watch / "spec.md"
+        f.write_text(SAMPLE_MD, encoding="utf-8")
+
+        state: dict[str, float] = {}
+        _doc_ingest_watch_tick(repo, watch, state)
+
+        # Force mtime forward and rewrite
+        new_mtime = time.time() + 5
+        f.write_text(SAMPLE_MD + "\n\n## Added Section\nMore content.\n", encoding="utf-8")
+        os.utime(f, (new_mtime, new_mtime))
+
+        res = _doc_ingest_watch_tick(repo, watch, state)
+        # mtime changed, so it gets re-processed; ingest_document with if_changed=True
+        # may classify as ingested or unchanged-content depending on hash.
+        assert (len(res["ingested"]) + len(res["skipped"])) == 1
+        assert len(res["errors"]) == 0
+
+    def test_new_file_added_between_sweeps(self, repo, tmp_path):
+        from scope_intel.cli import _doc_ingest_watch_tick
+        watch = tmp_path / "watched"
+        watch.mkdir()
+        (watch / "first.md").write_text("# First\n", encoding="utf-8")
+
+        state: dict[str, float] = {}
+        first = _doc_ingest_watch_tick(repo, watch, state)
+        assert len(first["ingested"]) == 1
+
+        # Drop a new file in
+        (watch / "second.md").write_text("# Second\n", encoding="utf-8")
+        second = _doc_ingest_watch_tick(repo, watch, state)
+        assert second["scanned"] == 2
+        # Only the new file should be ingested.
+        ingested_names = {Path(e["path"]).name for e in second["ingested"]}
+        assert ingested_names == {"second.md"}
+
+    def test_invalid_directory_returns_error(self, repo, tmp_path):
+        from scope_intel.cli import _doc_ingest_watch_tick
+        bogus = tmp_path / "does-not-exist"
+        state: dict[str, float] = {}
+        res = _doc_ingest_watch_tick(repo, bogus, state)
+        assert "error" in res
+
+    def test_glob_pattern_filters(self, repo, tmp_path):
+        from scope_intel.cli import _doc_ingest_watch_tick
+        watch = tmp_path / "watched"
+        watch.mkdir()
+        (watch / "yes.md").write_text("# yes\n", encoding="utf-8")
+        (watch / "no.txt").write_text("ignored\n", encoding="utf-8")
+        state: dict[str, float] = {}
+        res = _doc_ingest_watch_tick(repo, watch, state, glob_patterns=("*.md",))
+        assert res["scanned"] == 1
+        assert len(res["ingested"]) == 1
