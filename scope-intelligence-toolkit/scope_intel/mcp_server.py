@@ -504,6 +504,30 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "doc_section",
+        "description": (
+            "Extract a specific heading section from a .ai-context/ file "
+            "without returning the full file content. "
+            "Useful when only one section (e.g. 'Roadmap', 'Constraints') is needed "
+            "from a long generated file. Returns the section text and its char count."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                **_REPO_PROP,
+                "name": {
+                    "type": "string",
+                    "description": "File id or partial name (e.g. 'roadmap', '001').",
+                },
+                "heading": {
+                    "type": "string",
+                    "description": "Heading text to match (partial, case-insensitive).",
+                },
+            },
+            "required": ["name", "heading"],
+        },
+    },
+    {
         "name": "doc_annotate",
         "description": (
             "Add, view, or clear human annotations on a .ai-context/ file. "
@@ -976,6 +1000,10 @@ def _call_tool(name: str, arguments: dict) -> dict:
             "total_templates_created": total_tmpl,
             "results":                 results,
         }
+
+    if name == "doc_section":
+        from .cli import _doc_fetch_section
+        return _doc_fetch_section(repo, arguments["name"], arguments["heading"])
 
     if name == "doc_annotate":
         from .cli import _doc_annotate

@@ -1730,3 +1730,74 @@ class TestDocAnnotate:
             for entries in data.values()
             for a in entries
         )
+
+
+# ---------------------------------------------------------------------------
+# TestDocSection
+# ---------------------------------------------------------------------------
+
+class TestDocSection:
+    """Tests for _doc_fetch_section and _extract_section."""
+
+    def _ingest(self, repo, md_file, **kwargs):
+        return ingest_document(repo, md_file, overwrite=True, **kwargs)
+
+    def test_extract_section_found(self, repo, md_file):
+        from scope_intel.cli import _extract_section, _doc_fetch_section
+        content = "# Top\n\nIntro text.\n\n## Roadmap\n\nPhase 1 done.\n\n## Constraints\n\nNo secrets.\n"
+        section = _extract_section(content, "roadmap")
+        assert section is not None
+        assert "Phase 1 done" in section
+        assert "No secrets" not in section  # should stop before Constraints
+
+    def test_extract_section_case_insensitive(self, repo, md_file):
+        from scope_intel.cli import _extract_section
+        content = "# Top\n\n## ROADMAP\n\nPhase 1.\n"
+        assert _extract_section(content, "roadmap") is not None
+        assert _extract_section(content, "ROADMAP") is not None
+
+    def test_extract_section_not_found_returns_none(self, repo, md_file):
+        from scope_intel.cli import _extract_section
+        content = "# Top\n\n## Roadmap\n\nContent.\n"
+        assert _extract_section(content, "nonexistent-heading-xyz") is None
+
+    def test_doc_fetch_section_from_ingest(self, repo, md_file):
+        from scope_intel.cli import _doc_fetch_section
+        self._ingest(repo, md_file)
+        # roadmap.md should exist and have a top-level heading we can grab
+        result = _doc_fetch_section(repo, "roadmap", "Roadmap")
+        assert "error" not in result, result.get("error")
+        assert result["chars"] > 0
+        assert "heading" in result
+        assert result["chars"] <= result["full_chars"]
+
+    def test_doc_fetch_section_unknown_heading(self, repo, md_file):
+        from scope_intel.cli import _doc_fetch_section
+        self._ingest(repo, md_file)
+        result = _doc_fetch_section(repo, "roadmap", "xyzzy-no-such-heading")
+        assert "error" in result
+
+    def test_doc_fetch_section_unknown_file(self, repo, md_file):
+        from scope_intel.cli import _doc_fetch_section
+        self._ingest(repo, md_file)
+        result = _doc_fetch_section(repo, "xyzzy-no-file", "anything")
+        assert "error" in result
+
+    def test_list_pinned_filter(self, repo, md_file):
+        """scope doc list --pinned returns only pinned files."""
+        self._ingest(repo, md_file)
+        idx = json.loads(
+            (repo / ".ai-context" / "generated" / "index.json").read_text(encoding="utf-8")
+        )
+        files = [f for f in idx["files"] if f["layer"] == "generated"]
+        assert files
+        fid = files[0]["id"]
+        _doc_pin(repo, fid)
+
+        full_list = _doc_list(repo)
+        pinned_paths = _read_pinned(repo)
+
+        # Simulate --pinned filter (same logic as cmd_doc)
+        filtered_gen = [f for f in full_list.get("generated", []) if f["path"] in pinned_paths]
+        assert len(filtered_gen) == 1
+        assert filtered_gen[0]["id"] == fid

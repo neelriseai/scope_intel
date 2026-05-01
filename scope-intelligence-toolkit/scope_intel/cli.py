@@ -221,6 +221,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="List all .ai-context/ files generated for this repo.",
     )
     p_list.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_list.add_argument("--pinned", action="store_true",
+                        help="Show only pinned files.")
     p_list.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc fetch — retrieve content of a generated file
@@ -235,8 +237,34 @@ def build_parser() -> argparse.ArgumentParser:
             "Matched against file ids in .ai-context/generated/index.json."
         ),
     )
+    p_fetch.add_argument(
+        "--section", metavar="HEADING",
+        help=(
+            "Extract only the content of a specific heading section "
+            "(partial match, case-insensitive). E.g. --section 'roadmap'."
+        ),
+    )
     p_fetch.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
     p_fetch.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
+    # doc section — extract a single heading section from a file (shorthand)
+    p_sect = doc_sub.add_parser(
+        "section",
+        help=(
+            "Extract a specific heading section from a .ai-context/ file. "
+            "Equivalent to `scope doc fetch <file> --section <heading>`."
+        ),
+    )
+    p_sect.add_argument(
+        "name",
+        help="File id or partial name.",
+    )
+    p_sect.add_argument(
+        "heading",
+        help="Heading text to match (partial, case-insensitive).",
+    )
+    p_sect.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_sect.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc clear — remove generated .ai-context/ files
     p_clear = doc_sub.add_parser(
@@ -2303,11 +2331,70 @@ def _fmt_doc_search(r: dict) -> None:
         print(f"  (no matches — try a different query or run `scope doc list`)")
 
 
+def _extract_section(content: str, heading: str) -> str | None:
+    """Extract the content of a specific markdown heading section (case-insensitive partial match).
+
+    Returns the text of the section from the heading line until the next
+    heading at the same or higher level, or end of file. Returns None if not found.
+    """
+    import re as _re
+    q = heading.lower()
+    lines = content.splitlines(keepends=True)
+    start: int | None = None
+    start_level: int = 0
+
+    for i, line in enumerate(lines):
+        m = _re.match(r"^(#{1,6})\s+(.*)", line)
+        if m:
+            level = len(m.group(1))
+            title = m.group(2).strip()
+            if start is None:
+                if q in title.lower():
+                    start = i
+                    start_level = level
+            else:
+                # Stop when we hit a heading at the same or higher level
+                if level <= start_level:
+                    return "".join(lines[start:i]).rstrip()
+
+    if start is not None:
+        return "".join(lines[start:]).rstrip()
+    return None
+
+
+def _doc_fetch_section(repo: Path, name: str, heading: str) -> dict:
+    """Fetch a file then extract a specific section by heading."""
+    file_result = _doc_fetch(repo, name)
+    if "error" in file_result:
+        return file_result
+
+    section_text = _extract_section(file_result["content"], heading)
+    if section_text is None:
+        return {"error": f"no section matching '{heading}' in {file_result['id']} — "
+                         f"check headings with `scope doc fetch {name}`"}
+
+    return {
+        "id":        file_result["id"],
+        "path":      file_result["path"],
+        "title":     file_result["title"],
+        "layer":     file_result["layer"],
+        "heading":   heading,
+        "content":   section_text,
+        "chars":     len(section_text),
+        "full_chars": file_result["chars"],
+    }
+
+
 def _fmt_doc_fetch(r: dict) -> None:
     if "error" in r:
         print(r["error"]); return
-    print(f"# {r['title']}  [{r['layer']}]  ({r['chars']} chars)")
-    print(f"# path: {r['path']}")
+    if "heading" in r:
+        print(f"# {r['title']} → section '{r['heading']}'  [{r['layer']}]  "
+              f"({r['chars']} / {r['full_chars']} chars)")
+        print(f"# path: {r['path']}")
+    else:
+        print(f"# {r['title']}  [{r['layer']}]  ({r['chars']} chars)")
+        print(f"# path: {r['path']}")
     print()
     print(r["content"])
 
@@ -2648,12 +2735,29 @@ def cmd_doc(args) -> int:
     if args.doc_cmd == "list":
         repo = _resolve_repo(args.repo)
         result = _doc_list(repo)
+        # --pinned filter: restrict to pinned files only
+        if getattr(args, "pinned", False) and "error" not in result:
+            pinned = _read_pinned(repo)
+            result["generated"] = [f for f in result.get("generated", [])
+                                   if f["path"] in pinned]
+            result["curated"]   = [f for f in result.get("curated", [])
+                                   if f["path"] in pinned]
+            result["total"]     = len(result["generated"]) + len(result["curated"])
         _emit(result, args.json, formatter=_fmt_doc_list)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "section":
+        repo = _resolve_repo(args.repo)
+        result = _doc_fetch_section(repo, args.name, args.heading)
+        _emit(result, args.json, formatter=_fmt_doc_fetch)
         return 0 if "error" not in result else 2
 
     if args.doc_cmd == "fetch":
         repo = _resolve_repo(args.repo)
-        result = _doc_fetch(repo, args.name)
+        if getattr(args, "section", None):
+            result = _doc_fetch_section(repo, args.name, args.section)
+        else:
+            result = _doc_fetch(repo, args.name)
         _emit(result, args.json, formatter=_fmt_doc_fetch)
         return 0 if "error" not in result else 2
 
