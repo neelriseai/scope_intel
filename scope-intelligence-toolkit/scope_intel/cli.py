@@ -25,6 +25,13 @@ from .core.query_engine import (
     get_symbol_context,
     get_touchpoints,
 )
+from .core.federation import (
+    federation_add,
+    federation_link,
+    federation_list,
+    federation_remove,
+    federated_fetch,
+)
 from .core.mempalace import (
     add_memory,
     auto_capture_from_git,
@@ -804,6 +811,48 @@ def build_parser() -> argparse.ArgumentParser:
     p_mconf.add_argument("--repo", default=".")
     p_mconf.add_argument("--include-resolved", action="store_true")
     p_mconf.add_argument("--json", action="store_true")
+
+    # mem federation  (Phase 6.3) — cross-repo memory links
+    p_mfed = mem_sub.add_parser(
+        "federation",
+        help="Manage cross-repo memory federation (Phase 6.3).",
+    )
+    fed_sub = p_mfed.add_subparsers(dest="fed_cmd", required=True)
+
+    p_fed_add = fed_sub.add_parser("add", help="Register a repo in the federation.")
+    p_fed_add.add_argument("path", help="Absolute path to the repo root.")
+    p_fed_add.add_argument("--alias", required=True, help="Short alias (e.g. 'payments').")
+    p_fed_add.add_argument("--json", action="store_true")
+
+    p_fed_rm = fed_sub.add_parser("remove", help="Remove a repo and its links.")
+    p_fed_rm.add_argument("alias", help="Alias to remove.")
+    p_fed_rm.add_argument("--json", action="store_true")
+
+    p_fed_link = fed_sub.add_parser("link",
+                                    help="Add a directional link: from pulls from to.")
+    p_fed_link.add_argument("--from", dest="from_alias", required=True,
+                            help="Alias of the repo that will receive satellite memories.")
+    p_fed_link.add_argument("--to",   dest="to_alias",   required=True,
+                            help="Alias of the satellite repo to pull from.")
+    p_fed_link.add_argument(
+        "--scope", default="all",
+        help="Memory types to share: all | semantic | procedure | episodic "
+             "or '+'-joined subset (default: all).",
+    )
+    p_fed_link.add_argument("--json", action="store_true")
+
+    p_fed_list = fed_sub.add_parser("list", help="Show the full federation manifest.")
+    p_fed_list.add_argument("--json", action="store_true")
+
+    p_fed_fetch = fed_sub.add_parser(
+        "fetch",
+        help="Pull memories from linked repos for the current repo.",
+    )
+    p_fed_fetch.add_argument("--repo", default=".", help="Current repo root.")
+    p_fed_fetch.add_argument("--feature", default=None)
+    p_fed_fetch.add_argument("--file",    default=None)
+    p_fed_fetch.add_argument("--symbol",  default=None)
+    p_fed_fetch.add_argument("--json", action="store_true")
 
     # mem capture  (Phase 6.2) — agent-triggered high-signal capture
     p_mcap = mem_sub.add_parser(
@@ -4320,6 +4369,82 @@ def cmd_mem(args) -> int:
         result = detect_conflicts(repo, include_resolved=args.include_resolved)
         _emit(result, args.json, formatter=_fmt_conflicts)
         return 0
+
+    if mc == "federation":
+        fc = args.fed_cmd
+        if fc == "add":
+            result = federation_add(args.path, args.alias)
+            if args.json:
+                print(json.dumps(result, indent=2))
+            elif "error" in result:
+                print(result["error"], file=sys.stderr)
+            else:
+                print(f"registered: {result['alias']}  →  {result['path']}"
+                      + (f"  ({result['note']})" if result.get("note") else ""))
+            return 0 if "error" not in result else 2
+
+        if fc == "remove":
+            result = federation_remove(args.alias)
+            if args.json:
+                print(json.dumps(result, indent=2))
+            elif "error" in result:
+                print(result["error"], file=sys.stderr)
+            else:
+                print(f"removed: {result['removed']}")
+            return 0 if "error" not in result else 2
+
+        if fc == "link":
+            result = federation_link(args.from_alias, args.to_alias, args.scope)
+            if args.json:
+                print(json.dumps(result, indent=2))
+            elif "error" in result:
+                print(result["error"], file=sys.stderr)
+            else:
+                note = f"  ({result['note']})" if result.get("note") else ""
+                print(f"linked: {result['from']} → {result['to']}  scope={result['scope']}{note}")
+            return 0 if "error" not in result else 2
+
+        if fc == "list":
+            result = federation_list()
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                repos = result["repos"]
+                links = result["links"]
+                print(f"federation manifest: {result['manifest_path']}")
+                print(f"\nrepos ({len(repos)}):")
+                for r in repos:
+                    print(f"  {r['alias']:<20} {r['path']}")
+                print(f"\nlinks ({len(links)}):")
+                for lk in links:
+                    print(f"  {lk['from']:<20} → {lk['to']:<20}  scope={lk['scope']}")
+                if not repos:
+                    print("  (none — add repos with `scope mem federation add <path> --alias <a>`)")
+            return 0
+
+        if fc == "fetch":
+            repo = _resolve_repo(args.repo)
+            result = federated_fetch(
+                repo,
+                feature=args.feature,
+                file=args.file,
+                symbol=args.symbol,
+            )
+            if args.json:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+            else:
+                local = result.get("local_alias") or "(not in federation)"
+                print(f"federation fetch for '{local}': {result['total_remote']} remote entries")
+                for src in result.get("sources", []):
+                    status = f"error: {src['error']}" if src.get("error") else \
+                             f"{len(src['entries'])} entries"
+                    print(f"  [{src['alias']}] {status}")
+                if result.get("note"):
+                    print(f"  note: {result['note']}", file=sys.stderr)
+            return 0
+
+        print(f"unknown federation subcommand: {fc}", file=sys.stderr)
+        return 2
 
     if mc == "capture":
         result = capture_memory(

@@ -780,6 +780,140 @@ class TestMemCapture:
         assert r.get("rate_limited") is True
 
 
+class TestFederation:
+    """Phase 6.3 — cross-repo memory federation."""
+
+    @pytest.fixture()
+    def clean_manifest(self, monkeypatch, tmp_path):
+        """Redirect the federation manifest to a temp dir so tests don't pollute ~/.scope-intelligence."""
+        from scope_intel.core import federation as fed_mod
+        fake_home = tmp_path / "fakehome"
+        fake_home.mkdir()
+        monkeypatch.setattr(
+            fed_mod, "_federation_path",
+            lambda: fake_home / ".scope-intelligence" / "federation.json",
+        )
+        # Ensure the dir exists
+        (fake_home / ".scope-intelligence").mkdir(parents=True, exist_ok=True)
+        return fake_home
+
+    def test_add_repo(self, repo, clean_manifest):
+        from scope_intel.core.federation import federation_add, federation_list
+        result = federation_add(str(repo), alias="main-repo")
+        assert "error" not in result, result
+        assert result["ok"] is True
+        manifest = federation_list()
+        aliases = [r["alias"] for r in manifest["repos"]]
+        assert "main-repo" in aliases
+
+    def test_add_nonexistent_path_errors(self, clean_manifest):
+        from scope_intel.core.federation import federation_add
+        result = federation_add("/no/such/path", alias="ghost")
+        assert "error" in result
+
+    def test_duplicate_alias_different_path_errors(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import federation_add
+        other = tmp_path / "other"
+        other.mkdir()
+        federation_add(str(repo), alias="shared")
+        result = federation_add(str(other), alias="shared")
+        assert "error" in result
+
+    def test_remove_repo(self, repo, clean_manifest):
+        from scope_intel.core.federation import federation_add, federation_remove, federation_list
+        federation_add(str(repo), alias="to-remove")
+        result = federation_remove("to-remove")
+        assert "error" not in result
+        manifest = federation_list()
+        assert not any(r["alias"] == "to-remove" for r in manifest["repos"])
+
+    def test_remove_also_clears_links(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import (
+            federation_add, federation_link, federation_remove, federation_list
+        )
+        sat = tmp_path / "sat"
+        sat.mkdir()
+        federation_add(str(repo), alias="main")
+        federation_add(str(sat),  alias="satellite")
+        federation_link("main", "satellite")
+        federation_remove("satellite")
+        manifest = federation_list()
+        assert not any(lk["to"] == "satellite" for lk in manifest["links"])
+
+    def test_link_creates_entry(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import federation_add, federation_link, federation_list
+        sat = tmp_path / "sat"
+        sat.mkdir()
+        federation_add(str(repo), alias="main")
+        federation_add(str(sat),  alias="satellite")
+        federation_link("main", "satellite", scope="semantic")
+        manifest = federation_list()
+        assert any(
+            lk["from"] == "main" and lk["to"] == "satellite" and lk["scope"] == "semantic"
+            for lk in manifest["links"]
+        )
+
+    def test_link_unknown_alias_errors(self, repo, clean_manifest):
+        from scope_intel.core.federation import federation_add, federation_link
+        federation_add(str(repo), alias="main")
+        result = federation_link("main", "no-such-alias")
+        assert "error" in result
+
+    def test_federated_fetch_returns_remote_entries(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import (
+            federation_add, federation_link, federated_fetch
+        )
+        from scope_intel.core.mempalace import add_memory
+
+        # Set up a satellite repo with its own indexed store
+        sat = tmp_path / "satellite"
+        sat.mkdir()
+        store.ensure_index_dir(sat)
+        store.write_json(sat, "config", store.default_config())
+        add_memory(sat, "semantic", "shared constraint: always validate",
+                   confidence=0.9, features=["auth"])
+
+        federation_add(str(repo), alias="main")
+        federation_add(str(sat),  alias="satellite")
+        federation_link("main", "satellite", scope="semantic")
+
+        result = federated_fetch(repo)
+        assert result["local_alias"] == "main"
+        assert result["total_remote"] == 1
+        entry = result["sources"][0]["entries"][0]
+        assert entry["_federation_source"] == "satellite"
+        assert entry["note"] == "shared constraint: always validate"
+
+    def test_federated_fetch_scope_filter(self, repo, tmp_path, clean_manifest):
+        from scope_intel.core.federation import (
+            federation_add, federation_link, federated_fetch
+        )
+        from scope_intel.core.mempalace import add_memory
+
+        sat = tmp_path / "satellite"
+        sat.mkdir()
+        store.ensure_index_dir(sat)
+        store.write_json(sat, "config", store.default_config())
+        add_memory(sat, "semantic", "semantic fact", confidence=0.8)
+        add_memory(sat, "bug", "a bug", features=["auth"])
+
+        federation_add(str(repo), alias="main")
+        federation_add(str(sat),  alias="satellite")
+        # Only pull semantic from satellite
+        federation_link("main", "satellite", scope="semantic")
+
+        result = federated_fetch(repo)
+        types = [e["type"] for e in result["sources"][0]["entries"]]
+        assert "semantic" in types
+        assert "bug" not in types
+
+    def test_unregistered_repo_returns_note(self, repo, clean_manifest):
+        from scope_intel.core.federation import federated_fetch
+        result = federated_fetch(repo)
+        assert result["local_alias"] is None
+        assert result["total_remote"] == 0
+
+
 class TestMemPalaceList:
     def test_list_all(self, repo):
         add_memory(repo, "bug", "b1", features=["auth"])
