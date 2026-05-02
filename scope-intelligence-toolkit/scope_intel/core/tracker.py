@@ -19,6 +19,10 @@ from . import store
 TOKENS_PER_LOC = 10          # conservative: 50 chars/line ÷ 5 chars/token
 GLOB_OVERHEAD = 500          # tokens a naive Glob(*) scan costs regardless
 READ_OVERHEAD = 50           # tokens per Read call overhead
+INVENTORY_BASE_TOKENS = 80   # fixed cost for an index-only roster query
+INVENTORY_FILE_TOKENS = 12   # compact file row: path, language, feature, LOC
+INVENTORY_CLASS_TOKENS = 10  # compact class row
+INVENTORY_SYMBOL_TOKENS = 8  # compact symbol row
 
 
 def _loc_for(files: list, files_index: dict) -> int:
@@ -27,6 +31,46 @@ def _loc_for(files: list, files_index: dict) -> int:
 
 def _estimate_tokens(loc: int) -> int:
     return loc * TOKENS_PER_LOC
+
+
+def estimate_inventory_tokens(
+    *,
+    files: int,
+    classes: int = 0,
+    symbols: int = 0,
+    include_symbols: bool = True,
+) -> int:
+    """Estimate tokens for an index-only inventory response.
+
+    Inventory does not read source bodies. Its cost is the compact roster the
+    agent sees: file rows, class rows, and optionally symbol rows.
+    """
+    symbol_cost = symbols * INVENTORY_SYMBOL_TOKENS if include_symbols else 0
+    return (
+        INVENTORY_BASE_TOKENS
+        + files * INVENTORY_FILE_TOKENS
+        + classes * INVENTORY_CLASS_TOKENS
+        + symbol_cost
+    )
+
+
+def _strategy_for_command(command: str) -> str:
+    if command == "inventory":
+        return "index_inventory"
+    if command == "mem_fetch":
+        return "memory_context"
+    if command.startswith("doc_"):
+        return "document_context"
+    return "scoped_source"
+
+
+def _compact_summary(repo_root: Path) -> dict:
+    try:
+        from .compact_context import compact_stats
+
+        return compact_stats(repo_root, target="all")
+    except Exception as exc:  # pragma: no cover - defensive report hygiene
+        return {"target": "all", "total": 0, "error": str(exc)}
 
 
 def log_query(
@@ -58,11 +102,15 @@ def log_query(
 
     naive_tokens = _estimate_tokens(total_loc) + GLOB_OVERHEAD
     scope_tokens = _estimate_tokens(scope_loc) + READ_OVERHEAD * max(len(scope_files), 1)
+    strategy = (extra or {}).get("strategy") or _strategy_for_command(command)
+    if extra and "scope_tokens_est" in extra:
+        scope_tokens = int(extra["scope_tokens_est"])
     tokens_saved = max(naive_tokens - scope_tokens, 0)
 
     entry: dict = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "cmd": command,
+        "strategy": strategy,
         "args": query_args,
         "result_files": len(scope_files),
         "result_loc": scope_loc,
@@ -95,18 +143,19 @@ def compute_global_summary(repo_roots: list) -> dict:
 
         if not entries:
             repos.append({
-                "path":           str(root),
-                "name":           root.name,
-                "total_queries":  0,
-                "tokens_saved":   0,
-                "naive_tokens":   0,
-                "scope_tokens":   0,
-                "savings_percent": 0.0,
-                "files_avoided":  0,
-                "loc_avoided":    0,
-                "avg_latency_ms": 0.0,
-                "memory":         mem,
-                "note":           "no queries logged yet",
+                "path":             str(root),
+                "name":             root.name,
+                "total_queries":    0,
+                "tokens_saved":     0,
+                "naive_tokens":     0,
+                "scope_tokens":     0,
+                "savings_percent":  0.0,
+                "files_avoided":    0,
+                "loc_avoided":      0,
+                "avg_latency_ms":   0.0,
+                "memory":           mem,
+                "compact_sidecars": _compact_summary(root),
+                "note":             "no queries logged yet",
             })
             continue
 
@@ -134,6 +183,7 @@ def compute_global_summary(repo_roots: list) -> dict:
             "loc_avoided":     avoided_loc,
             "avg_latency_ms":  round(avg_lat, 1),
             "memory":          mem,
+            "compact_sidecars": _compact_summary(root),
         })
 
     # combined totals
@@ -147,13 +197,20 @@ def compute_global_summary(repo_roots: list) -> dict:
 
     # merged by-command
     by_cmd: dict = {}
+    by_strategy: dict = {}
     for e in combined_entries:
         cmd = e.get("cmd", "?")
         if cmd not in by_cmd:
             by_cmd[cmd] = {"queries": 0, "tokens_saved": 0}
         by_cmd[cmd]["queries"] += 1
         by_cmd[cmd]["tokens_saved"] += e.get("tokens_saved_est", 0)
+        strategy = e.get("strategy") or _strategy_for_command(cmd)
+        if strategy not in by_strategy:
+            by_strategy[strategy] = {"queries": 0, "tokens_saved": 0}
+        by_strategy[strategy]["queries"] += 1
+        by_strategy[strategy]["tokens_saved"] += e.get("tokens_saved_est", 0)
     by_cmd = dict(sorted(by_cmd.items(), key=lambda kv: -kv[1]["tokens_saved"]))
+    by_strategy = dict(sorted(by_strategy.items(), key=lambda kv: -kv[1]["tokens_saved"]))
 
     # recent 20 across all repos, newest first
     combined_entries.sort(key=lambda e: e.get("ts", ""), reverse=True)
@@ -172,6 +229,7 @@ def compute_global_summary(repo_roots: list) -> dict:
             "loc_avoided":      total_avoided_loc,
         },
         "by_command":    by_cmd,
+        "by_strategy":   by_strategy,
         "recent_queries": recent,
     }
 
@@ -179,10 +237,12 @@ def compute_global_summary(repo_roots: list) -> dict:
 def compute_savings_summary(repo_root: Path) -> dict:
     """Aggregate all query log entries into a savings report dict."""
     entries = store.read_query_log(repo_root)
+    compact = _compact_summary(repo_root)
     if not entries:
         return {
             "total_queries": 0,
             "note": "No queries logged yet. Run some scope commands first.",
+            "compact_sidecars": compact,
         }
 
     total_saved = sum(e.get("tokens_saved_est", 0) for e in entries)
@@ -193,12 +253,18 @@ def compute_savings_summary(repo_root: Path) -> dict:
     avg_latency = (sum(e.get("latency_ms", 0) for e in entries) / len(entries)) if entries else 0
 
     by_cmd: dict = {}
+    by_strategy: dict = {}
     for e in entries:
         cmd = e.get("cmd", "?")
         if cmd not in by_cmd:
             by_cmd[cmd] = {"queries": 0, "tokens_saved": 0}
         by_cmd[cmd]["queries"] += 1
         by_cmd[cmd]["tokens_saved"] += e.get("tokens_saved_est", 0)
+        strategy = e.get("strategy") or _strategy_for_command(cmd)
+        if strategy not in by_strategy:
+            by_strategy[strategy] = {"queries": 0, "tokens_saved": 0}
+        by_strategy[strategy]["queries"] += 1
+        by_strategy[strategy]["tokens_saved"] += e.get("tokens_saved_est", 0)
 
     savings_pct = round(100 * total_saved / total_naive, 1) if total_naive else 0
 
@@ -212,5 +278,7 @@ def compute_savings_summary(repo_root: Path) -> dict:
         "total_loc_avoided": total_avoided_loc,
         "avg_latency_ms": round(avg_latency, 1),
         "by_command": dict(sorted(by_cmd.items(), key=lambda kv: -kv[1]["tokens_saved"])),
+        "by_strategy": dict(sorted(by_strategy.items(), key=lambda kv: -kv[1]["tokens_saved"])),
+        "compact_sidecars": compact,
         "recent_queries": entries[-20:][::-1],
     }

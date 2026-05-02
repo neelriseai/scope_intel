@@ -26,6 +26,7 @@ def format_terminal(summary: dict) -> str:
     a(f"  Naive cost (est.)     : {summary['total_naive_tokens_est']:,}")
     a(f"  Scope cost (est.)     : {summary['total_scope_tokens_est']:,}")
     a(f"  Savings               : {summary['savings_percent']}%")
+    a("  Expected range        : 65-75% scope-only; up to 80-85% with inventory + memory/docs + compact sidecars")
     a(f"  Files avoided         : {summary['total_files_avoided']:,}  ({summary['total_loc_avoided']:,} LOC)")
     a(f"  Avg query latency     : {summary['avg_latency_ms']} ms")
     a("")
@@ -34,6 +35,28 @@ def format_terminal(summary: dict) -> str:
         bar = "#" * min(int(stats["queries"] * 2), 30)
         a(f"    {cmd:<18} {stats['queries']:>4} queries   "
           f"~{stats['tokens_saved']:>7,} tkn saved   {bar}")
+    a("")
+    a("  By saving strategy:")
+    for strategy, stats in summary.get("by_strategy", {}).items():
+        bar = "#" * min(int(stats["queries"] * 2), 30)
+        a(f"    {_strategy_label(strategy):<24} {stats['queries']:>4} queries   "
+          f"~{stats['tokens_saved']:>7,} tkn saved   {bar}")
+
+    compact = summary.get("compact_sidecars", {})
+    a("")
+    if compact.get("total", 0):
+        a("  Compact sidecars:")
+        a(f"    Files                 : {compact.get('total', 0):,}")
+        a(f"    Source tokens (est.)  : {compact.get('source_tokens_est', 0):,}")
+        a(f"    DSL tokens (est.)     : {compact.get('dsl_tokens_est', 0):,}")
+        a(f"    Compact saving        : {compact.get('saving_percent_est', 0)}%")
+    else:
+        a("  Compact sidecars       : none built yet "
+          "(run `scope compact build --target all`)")
+    a("")
+    a("  Strategy catalog (typical per-use savings):")
+    for item in _STRATEGY_CATALOG:
+        a(f"    {_strategy_label(item['strategy']):<24} {item['typical']:<28} {item['usage']}")
     a("")
     a("  Recent queries (newest first):")
     a(f"  {'Timestamp':<22} {'Command':<16} {'Files':<8} {'Saved(tkn)':<12} {'ms'}")
@@ -86,6 +109,7 @@ tr:hover td { background: #1e293b; }
 .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
          font-size: 0.7rem; font-weight: 600; background: #0369a1; color: #e0f2fe; }
 .note { color: #64748b; font-style: italic; font-size: 0.85rem; }
+.dim { color: #64748b; }
 """
 
 
@@ -95,6 +119,51 @@ def _fmt_k(n: int) -> str:
     if n >= 1_000:
         return f"{n/1_000:.1f}K"
     return str(n)
+
+
+def _strategy_label(strategy: str) -> str:
+    labels = {
+        "scoped_source": "Scoped source reads",
+        "index_inventory": "Index-only inventory",
+        "memory_context": "Memory context",
+        "document_context": "Document context",
+        "compact_sidecar": "Compact sidecars",
+    }
+    return labels.get(strategy, strategy.replace("_", " ").title())
+
+
+_STRATEGY_CATALOG = [
+    {
+        "strategy": "index_inventory",
+        "usage": "Repo/file/class/symbol roster before opening files",
+        "typical": "80-95%",
+        "notes": "Best first query; avoids source bodies entirely.",
+    },
+    {
+        "strategy": "scoped_source",
+        "usage": "feature, impacted, tests, symbol, callers, callees, touchpoints",
+        "typical": "60-75%",
+        "notes": "Reads only the relevant files instead of the whole repo.",
+    },
+    {
+        "strategy": "memory_context",
+        "usage": "mem fetch/search/capture for stable repo knowledge",
+        "typical": "70-90%",
+        "notes": "Avoids rediscovering decisions, fixes, procedures, and ownership.",
+    },
+    {
+        "strategy": "document_context",
+        "usage": "doc fetch/fetch-for/search after Python or Qwen ingest",
+        "typical": "60-85%",
+        "notes": "Fetches targeted architecture records instead of full docs.",
+    },
+    {
+        "strategy": "compact_sidecar",
+        "usage": "compact DSL sidecars for .ai-context, skills, and memory",
+        "typical": "30-70% artifact-level; 80-85% full workflow",
+        "notes": "Read compact DSL first; decompress/read originals only when needed.",
+    },
+]
 
 
 def format_html(summary: dict, repo_root: Path) -> str:
@@ -123,6 +192,8 @@ def format_html(summary: dict, repo_root: Path) -> str:
     <div class="card-value green">{_fmt_k(saved)}</div></div>
   <div class="card"><div class="card-label">Savings %</div>
     <div class="card-value pct green">{pct}%</div></div>
+  <div class="card"><div class="card-label">Full workflow estimate</div>
+    <div class="card-value pct green">80-85%</div></div>
   <div class="card"><div class="card-label">Naive cost (est.)</div>
     <div class="card-value yellow">{_fmt_k(naive)}</div></div>
   <div class="card"><div class="card-label">Scope cost (est.)</div>
@@ -134,6 +205,22 @@ def format_html(summary: dict, repo_root: Path) -> str:
   <div class="card"><div class="card-label">Avg latency</div>
     <div class="card-value">{lat} ms</div></div>
 </div>"""
+
+    compact = summary.get("compact_sidecars", {})
+    compact_html = ""
+    if compact.get("total", 0):
+        compact_html = f"""
+<section><h2>Compact sidecar savings</h2>
+<div class="cards">
+  <div class="card"><div class="card-label">Sidecars built</div>
+    <div class="card-value purple">{compact.get('total', 0):,}</div></div>
+  <div class="card"><div class="card-label">Source tokens</div>
+    <div class="card-value yellow">{_fmt_k(compact.get('source_tokens_est', 0))}</div></div>
+  <div class="card"><div class="card-label">DSL tokens</div>
+    <div class="card-value">{_fmt_k(compact.get('dsl_tokens_est', 0))}</div></div>
+  <div class="card"><div class="card-label">Compact saving</div>
+    <div class="card-value pct green">{compact.get('saving_percent_est', 0)}%</div></div>
+</div></section>"""
 
     # --- command bars ---
     by_cmd = summary.get("by_command", {})
@@ -150,6 +237,46 @@ def format_html(summary: dict, repo_root: Path) -> str:
             f'</div>'
         )
     bars_html = f'<section><h2>Tokens saved by command</h2>{"".join(bar_rows)}</section>'
+
+    # --- strategy bars ---
+    by_strategy = summary.get("by_strategy", {})
+    max_strategy_saved = max((v["tokens_saved"] for v in by_strategy.values()), default=1) or 1
+    strategy_rows: list = []
+    for strategy, stats in by_strategy.items():
+        pct_w = int(100 * stats["tokens_saved"] / max_strategy_saved)
+        strategy_rows.append(
+            f'<div class="bar-row">'
+            f'<div class="bar-label">{html.escape(_strategy_label(strategy))}</div>'
+            f'<div class="bar-track"><div class="bar-fill green" style="width:{pct_w}%">'
+            f'{_fmt_k(stats["tokens_saved"])} tkn</div></div>'
+            f'<span style="color:#64748b;font-size:.75rem">{stats["queries"]}q</span>'
+            f'</div>'
+        )
+    strategies_html = (
+        f'<section><h2>Tokens saved by strategy</h2>{"".join(strategy_rows)}</section>'
+        if strategy_rows else ""
+    )
+
+    catalog_rows = []
+    for item in _STRATEGY_CATALOG:
+        catalog_rows.append(
+            f"<tr>"
+            f"<td><strong>{html.escape(_strategy_label(item['strategy']))}</strong></td>"
+            f"<td>{html.escape(item['usage'])}</td>"
+            f"<td>{html.escape(item['typical'])}</td>"
+            f"<td class='dim'>{html.escape(item['notes'])}</td>"
+            f"</tr>"
+        )
+    catalog_html = f"""
+<section><h2>Strategy catalog and expected savings</h2>
+<table><thead><tr>
+  <th>Strategy</th><th>Usual usage</th><th>Typical saving</th><th>Notes</th>
+</tr></thead><tbody>{"".join(catalog_rows)}</tbody></table>
+<p class="note" style="margin-top:.75rem">
+  Scope-only workflows usually land around 65-75%. Combining index inventory,
+  scoped source reads, memory/doc retrieval, and compact sidecars is expected to
+  reach up to about 80-85% on codebase-context tasks.
+</p></section>"""
 
     # --- recent queries table ---
     recent = summary.get("recent_queries", [])
@@ -173,7 +300,7 @@ def format_html(summary: dict, repo_root: Path) -> str:
   <th>Tokens saved</th><th>Latency</th><th>Args</th>
 </tr></thead><tbody>{"".join(rows)}</tbody></table></section>"""
 
-    body = cards_html + bars_html + table_html
+    body = cards_html + compact_html + bars_html + strategies_html + catalog_html + table_html
     return _wrap_html(body, repo_name, ts)
 
 
