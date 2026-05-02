@@ -16,6 +16,10 @@ scope-intelligence-toolkit/artifacts/pytest-*/
 **/.scope-intelligence/query_log.jsonl
 .scope-intelligence/mempalace.jsonl
 
+# Local Codex/agent skill workspace. Keep this private unless intentionally
+# promoting a skill into a tracked project artifact.
+.agents/
+
 # Reports
 scope-report.html
 
