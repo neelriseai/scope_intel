@@ -317,12 +317,20 @@ class TestMCPServer:
         out = _sys.stdout.getvalue()
         _sys.stdout = old
         r = json.loads(out)
-        names = [t["name"] for t in r["result"]["tools"]]
+        tools = r["result"]["tools"]
+        names = [t["name"] for t in tools]
+        by_name = {t["name"]: t for t in tools}
         assert "scope_summary" in names
         assert "scope_inventory" in names
         assert "compact_build" in names
+        assert "doc_ingest" in names
         assert "mem_add" in names
         assert "mem_fetch" in names
+        assert "source file bodies" in by_name["scope_inventory"]["description"]
+        assert (
+            by_name["doc_ingest"]["inputSchema"]["properties"]["ollama_model"]["default"]
+            == "qwen2.5:7b"
+        )
 
     def test_unknown_method(self, repo):
         import scope_intel.mcp_server as mcp

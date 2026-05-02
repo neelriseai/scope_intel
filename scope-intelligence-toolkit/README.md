@@ -3,7 +3,8 @@
 `scope_intel` is a zero-dependency Python toolkit that gives AI agents precise
 repo context without making them read the whole codebase. It builds a compact
 `.scope-intelligence/` index containing file metadata, symbols, dependencies,
-tests, touchpoints, memories, document context, and optional compact sidecars.
+tests, touchpoints, memories, LLM-assisted document context, and optional
+compact sidecars.
 
 The goal is simple: let an assistant ask, "what do I need to know for this
 change?" and get the right files, classes, tests, memories, and design notes in
@@ -44,7 +45,7 @@ source.
 | Token tracker | Logs estimated naive vs scoped token cost | Measuring savings over time |
 | MemPalace | Semantic, procedural, episodic, and structural memory | Persisting repo facts and past lessons |
 | Memory federation | Link memories across related repos | Multi-repo systems |
-| Doc ingest | Converts design docs into `.ai-context/` files | Keeping architecture context queryable |
+| Doc ingest | Converts docs into `.ai-context/` using Python mode or Qwen/Ollama LLM classification | Keeping architecture context queryable |
 | Compact sidecars | Agent-facing DSL plus exact compressed payload | Reducing prompt/context tokens safely |
 | MCP server | 52 JSON-RPC tools over stdio | Letting Claude/Codex call the toolkit directly |
 
@@ -111,7 +112,12 @@ without spending tokens on file contents:
 scope inventory --repo .
 scope inventory --feature checkout --repo .
 scope inventory --feature checkout --no-symbols --repo .
+scope inventory --repo . --json
 ```
+
+The same capability is exposed to tool-capable assistants as the MCP tool
+`scope_inventory`. Pass `include_symbols=false` for the cheapest file/class
+roster, or a `feature` value to restrict the answer to one subsystem.
 
 ### Impact, Tests, Symbols, Graphs
 
@@ -166,8 +172,18 @@ scope mem prune --below 0.2 --dry-run
 `scope doc` ingests design docs and keeps architecture context close to the
 repo, instead of repeatedly pasting full documents into chat.
 
+Document ingest has two modes:
+
+- `python`: fast deterministic parser and keyword/router, no LLM.
+- `llm`: Qwen through Ollama reads structured chunks, classifies them into
+  target context files, extracts richer architecture records, and can run a
+  second synthesis pass for `module-map.md`.
+
 ```bash
 scope doc ingest docs/design.md --repo .
+scope doc ingest docs/design.md --repo . --mode llm --ollama-model qwen2.5:7b
+scope doc ingest docs/design.md --repo . --mode llm --second-pass --verify
+scope doc ingest-batch docs --repo . --mode llm --if-changed
 scope doc list --repo .
 scope doc fetch overview --repo .
 scope doc search "validation" --repo .
@@ -176,6 +192,11 @@ scope doc stats --repo .
 scope doc report --repo .
 scope doc validate --repo .
 ```
+
+In LLM mode, Ollama must be running locally. The CLI default model is
+`qwen2.5:7b`, and both the CLI and MCP `doc_ingest` tool let you override the
+model and server URL. If Ollama is unavailable, ingest falls back to Python mode
+and reports the fallback in the result.
 
 The generated layout:
 
@@ -261,8 +282,10 @@ After editing, run `scope update --files <changed-files>`.
 For design-doc work:
 
 ```text
-Use `scope doc fetch-for <feature>` and `scope compact stats/validate` before
-loading large design docs. Prefer compact sidecars when available.
+If a new design document must be parsed, use `scope doc ingest --mode llm`
+with Qwen/Ollama. Then use `scope doc fetch-for <feature>` and
+`scope compact stats/validate` before loading large design docs. Prefer compact
+sidecars when available.
 ```
 
 For memory:
@@ -295,6 +318,8 @@ Common tools:
 - `compact_validate`
 - `compact_stats`
 - `mem_fetch`
+- `doc_ingest`
+- `doc_ingest_batch`
 - `doc_fetch_for_feature`
 
 Use MCP when your AI environment can call tools directly. Use the CLI when the
