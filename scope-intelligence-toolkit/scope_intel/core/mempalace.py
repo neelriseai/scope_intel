@@ -328,15 +328,20 @@ def fetch_relevant(
         repo_root, scope_files, scope_features, scope_symbols
     )
 
+    total = len(semantic_matches) + len(procedure_matches) + len(episodic_matches)
+
     # log as scope query for token savings report
     log_query(
         repo_root,
         "mem_fetch",
         {"feature": feature, "file": file, "symbol": symbol, "kind": kind},
         list(scope_files),
+        extra={
+            "strategy": "memory_context",
+            "memory_entries": total,
+        },
     )
 
-    total = len(semantic_matches) + len(procedure_matches) + len(episodic_matches)
     result: dict = {
         "query": {
             "feature": feature,

@@ -27,9 +27,20 @@ scope mem fetch --feature auth --repo .
 ```
 
 In the current project logs, scope queries have measured substantial token
-savings versus naive whole-repo reading. Your numbers will depend on repo size,
-feature boundaries, and how consistently agents query the index before reading
-source.
+savings versus naive whole-repo reading. The older scope-only workflow usually
+saves about **65-75%**. When agents consistently use the full stack - inventory
+first, scoped source reads, MemPalace/doc retrieval, and compact sidecars -
+expected savings can reach **up to about 80-85%** on codebase-context tasks.
+Your measured number will depend on repo size, feature boundaries, and how
+consistently agents query the index before reading source.
+
+| Strategy | Usual Usage | Typical Saving |
+| --- | --- | --- |
+| Index inventory | `scope inventory`, MCP `scope_inventory`; inspect files/classes/symbols without source bodies | 80-95% for repo-shape discovery |
+| Scoped source reads | `scope feature`, `scope impacted`, `scope tests`, `scope symbol`, `scope touchpoints` | 60-75% for focused code work |
+| Memory context | `scope mem fetch/search`; reuse decisions, fixes, procedures, ownership, stable facts | 70-90% for repeated repo knowledge |
+| Document context | `scope doc fetch-for/search` after Python or Qwen/Ollama ingest | 60-85% for architecture/design lookup |
+| Compact sidecars | `scope compact build/stats/validate`; read DSL before original docs/skills/memory | 30-70% per artifact, supports 80-85% full workflow |
 
 ## Core Features
 

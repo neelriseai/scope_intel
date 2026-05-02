@@ -60,7 +60,12 @@ from .core.compact_context import (
 )
 from .core.reporter import format_global_html, format_global_terminal, format_html, format_terminal
 from .core.summarizer import feature_one_liner
-from .core.tracker import compute_global_summary, compute_savings_summary, log_query
+from .core.tracker import (
+    compute_global_summary,
+    compute_savings_summary,
+    estimate_inventory_tokens,
+    log_query,
+)
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "CLAUDE.md.tmpl"
 
@@ -1542,7 +1547,27 @@ def cmd_inventory(args) -> int:
     _emit(result, args.json, formatter=_fmt_inventory)
     if "error" not in result:
         files = [f["file"] for f in result.get("files", [])]
-        log_query(repo, "inventory", {"feature": getattr(args, "feature", None)}, files)
+        totals = result.get("totals", {})
+        scope_tokens = estimate_inventory_tokens(
+            files=totals.get("files", len(files)),
+            classes=totals.get("classes", 0),
+            symbols=totals.get("symbols", 0),
+            include_symbols=not getattr(args, "no_symbols", False),
+        )
+        log_query(
+            repo,
+            "inventory",
+            {
+                "feature": getattr(args, "feature", None),
+                "include_symbols": not getattr(args, "no_symbols", False),
+            },
+            files,
+            extra={
+                "strategy": "index_inventory",
+                "scope_tokens_est": scope_tokens,
+                "note": "index-only roster; source file bodies not read",
+            },
+        )
     return 0
 
 
