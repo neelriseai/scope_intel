@@ -21,9 +21,23 @@ same repo structure: walking directories, opening source files, finding tests,
 and rebuilding feature ownership. `scope_intel` moves that work into compact
 JSON indexes and optional sidecar files.
 
-Typical savings depend on repo size and assistant discipline. The biggest gains
-come when agents query `scope inventory`, `scope feature`, `scope impacted`,
-`scope tests`, `scope mem fetch`, and compact sidecars before reading source.
+Typical savings depend on repo size and assistant discipline. The older
+scope-only workflow usually saves about **65-75%** versus repeatedly reading the
+whole repo. With the newer workflow - index inventory first, scoped source reads
+second, memory/doc retrieval for stable context, and compact sidecars for large
+context artifacts - expected savings can reach **up to about 80-85%** on
+codebase-context tasks. The `scope report` dashboard shows the measured value
+from local query logs; this repo's local log measured **55.4%** after adding
+the index-only inventory estimator, before compact sidecars or regular
+memory/doc retrieval were reflected in usage.
+
+| Strategy | Usual usage | Typical token saving |
+| --- | --- | --- |
+| Index inventory | `scope inventory`, MCP `scope_inventory`; see files/classes/symbols before opening source | 80-95% for roster discovery |
+| Scoped source reads | `scope feature`, `scope impacted`, `scope tests`, `scope symbol`, `scope touchpoints` | 60-75% for code navigation |
+| Memory context | `scope mem fetch/search`; avoid rediscovering decisions, fixes, ownership, procedures | 70-90% for repeated repo knowledge |
+| Document context | `scope doc fetch-for/search` after Python or Qwen/Ollama ingest | 60-85% for architecture/design lookup |
+| Compact sidecars | `scope compact build/stats/validate`; read DSL before original docs/skills/memory | 30-70% per artifact, supports 80-85% full workflow |
 
 ## Main Features
 
@@ -76,6 +90,10 @@ scope mem fetch --feature auth --repo path/to/repo
 
 # Refresh after edits
 scope update --repo path/to/repo --files src/auth/login.py tests/auth/test_login.py
+
+# Measure token savings
+scope report --repo path/to/repo
+scope report --repo path/to/repo --html --output scope-report.html
 ```
 
 ## Inventory Without Reading Source

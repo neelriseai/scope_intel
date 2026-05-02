@@ -35,7 +35,12 @@ from scope_intel.core.query_engine import (
     get_callers,
     get_callees,
 )
-from scope_intel.core.tracker import compute_savings_summary, compute_global_summary, log_query
+from scope_intel.core.tracker import (
+    compute_savings_summary,
+    compute_global_summary,
+    estimate_inventory_tokens,
+    log_query,
+)
 from scope_intel.core.reporter import format_terminal, format_html, format_global_terminal, format_global_html
 from scope_intel.core.diff import compute_diff_scope
 from scope_intel.core.compact_context import (
@@ -215,6 +220,21 @@ class TestTracker:
         assert s["total_queries"] >= 2
         assert s["total_tokens_saved_est"] >= 0
         assert "feature" in s["by_command"]
+        assert "scoped_source" in s["by_strategy"]
+
+    def test_inventory_strategy_uses_index_only_cost(self, repo):
+        cost = estimate_inventory_tokens(files=3, classes=1, symbols=5)
+        entry = log_query(
+            repo,
+            "inventory",
+            {"include_symbols": True},
+            ["src/auth/login.py", "src/billing/payment.py", "tests/test_auth.py"],
+            extra={"strategy": "index_inventory", "scope_tokens_est": cost},
+        )
+        assert entry["strategy"] == "index_inventory"
+        assert entry["scope_tokens_est"] == cost
+        s = compute_savings_summary(repo)
+        assert "index_inventory" in s["by_strategy"]
 
     def test_savings_summary_empty(self, empty_repo):
         s = compute_savings_summary(empty_repo)
@@ -248,6 +268,7 @@ class TestReporter:
         out = format_terminal(s)
         assert "TOKEN SAVINGS" in out
         assert "feature" in out
+        assert "Strategy catalog" in out
 
     def test_format_html_produces_valid_html(self, repo):
         log_query(repo, "symbol", {"name": "validate"}, ["src/auth/login.py"])
@@ -256,6 +277,7 @@ class TestReporter:
         assert "<!DOCTYPE html>" in h
         assert "card-value" in h
         assert "bar-fill" in h
+        assert "Strategy catalog" in h
 
     def test_format_global_terminal(self, repo, empty_repo):
         log_query(repo, "feature", {"name": "auth"}, ["src/auth/login.py"])
