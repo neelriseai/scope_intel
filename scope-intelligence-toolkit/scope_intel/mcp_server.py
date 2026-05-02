@@ -383,8 +383,8 @@ TOOLS: list[dict] = [
                 },
                 "ollama_model": {
                     "type": "string",
-                    "default": "qwen2.5:14b",
-                    "description": "Ollama model for mode=llm (default: qwen2.5:14b).",
+                    "default": "qwen2.5:7b",
+                    "description": "Ollama model for mode=llm (default: qwen2.5:7b).",
                 },
                 "ollama_url": {
                     "type": "string",
@@ -1213,7 +1213,7 @@ def _call_tool(name: str, arguments: dict) -> dict:
             repo,
             Path(arguments["doc"]),
             mode=arguments.get("mode", "python"),
-            ollama_model=arguments.get("ollama_model", "qwen2.5:14b"),
+            ollama_model=arguments.get("ollama_model", "qwen2.5:7b"),
             ollama_url=arguments.get("ollama_url", "http://localhost:11434"),
             overwrite=arguments.get("overwrite", False),
             dry_run=arguments.get("dry_run", False),
