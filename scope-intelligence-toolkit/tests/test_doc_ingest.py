@@ -286,6 +286,26 @@ class TestDocxTableToMarkdown:
         assert header_line.count("Header") == 1
 
 
+class TestDocxReaderCoverage:
+    def test_docx_reads_header_and_footer_text(self, tmp_path):
+        pytest.importorskip("docx")
+        import docx
+
+        p = tmp_path / "with_header_footer.docx"
+        doc = docx.Document()
+        doc.sections[0].header.paragraphs[0].text = "Confidential Project Header"
+        doc.sections[0].footer.paragraphs[0].text = "Version 1.2 Footer"
+        doc.add_heading("Body Heading", level=1)
+        doc.add_paragraph("Body paragraph.")
+        doc.save(p)
+
+        result = read_document(p)
+        assert "error" not in result, result
+        assert "Body Heading" in result["text"]
+        assert "Header: Confidential Project Header" in result["text"]
+        assert "Footer: Version 1.2 Footer" in result["text"]
+
+
 # ---------------------------------------------------------------------------
 # llm_client
 # ---------------------------------------------------------------------------
@@ -358,6 +378,24 @@ class TestRouteSection:
         dest, prefix, slug = _route_section("Schema Design", "data model JSON type")
         assert dest == "generated"
         assert slug == "schema-design"
+
+    def test_prompt_caching_routes_to_architecture(self):
+        dest, prefix, slug = _route_section(
+            "4.3 Prompt Caching",
+            "Cache stable prompt prefixes to reduce token cost.",
+        )
+        assert dest == "generated"
+        assert prefix == "002"
+        assert slug == "system-architecture"
+
+    def test_product_market_fit_routes_to_roadmap(self):
+        dest, prefix, slug = _route_section(
+            "11. Product-Market Fit Analysis",
+            "Pain vs preference classification and 30-day PMF proof plan.",
+        )
+        assert dest == "generated"
+        assert prefix is None
+        assert slug == "roadmap"
 
     # ---- route override tests ----
 
@@ -586,6 +624,19 @@ class TestIngestDocumentPython:
         # .scope-intelligence/ should now exist
         assert (tmp_path / ".scope-intelligence").exists()
 
+    def test_preamble_with_architecture_terms_routes_to_overview(self, repo, tmp_path):
+        doc = tmp_path / "preamble.md"
+        doc.write_text(
+            "This architecture overview explains the system pipeline before headings.\n\n"
+            "# Details\n\nRandom notes without routing words.\n",
+            encoding="utf-8",
+        )
+        result = ingest_document(repo, doc, dry_run=True, overwrite=True)
+        preamble = next(e for e in result["routing_table"] if "preamble" in e["section"])
+        assert preamble["file"] == "001-project-overview.md"
+        assert preamble["layer"] == "generated"
+        assert result["routing_coverage"]["sections_routed"] >= 1
+
 
 # ---------------------------------------------------------------------------
 # doc_ingestor — routing_table in result
@@ -678,6 +729,67 @@ class TestIngestDocumentLLMFallback:
         assert "warning" in result
 
 
+class TestIngestDocumentLLMSecondPass:
+    class FakeLLM:
+        model = "fake-qwen"
+
+        def is_available(self):
+            return True
+
+        def global_summary(self, excerpt):  # noqa: ARG002
+            return {"project_name": "Fake Project", "components": ["Runtime"]}
+
+        def classify_chunk(self, chunk, global_ctx):  # noqa: ARG002
+            title = chunk["title"]
+            if "Architecture" in title:
+                return {
+                    "target_file": "002-system-architecture.md",
+                    "section_title": "Architecture",
+                    "summary": "Runtime architecture summary.",
+                    "key_facts": [],
+                    "constraints": [],
+                    "is_feature": False,
+                    "feature_id": "",
+                    "tags": ["architecture"],
+                }
+            if "Module Map" in title:
+                return {
+                    "target_file": "module-map.md",
+                    "section_title": "Existing Module Map",
+                    "summary": "Existing source map.",
+                    "key_facts": [],
+                    "constraints": [],
+                    "is_feature": False,
+                    "feature_id": "",
+                    "tags": [],
+                }
+            return {"target_file": "skip"}
+
+        def module_map_pass(self, file_summaries):
+            assert file_summaries
+            return "# Synthesized Module Map\n\n- Runtime -> API"
+
+    def test_second_pass_overwrites_placeholder_module_bucket(self, repo, tmp_path, monkeypatch):
+        from scope_intel.core import llm_client
+
+        doc = tmp_path / "llm_design.md"
+        doc.write_text(
+            "# Architecture\n\nThe runtime architecture has an API boundary.\n\n"
+            "# Module Map\n\nOld source module text that should be preserved below synthesis.\n",
+            encoding="utf-8",
+        )
+        fake = self.FakeLLM()
+        monkeypatch.setattr(llm_client, "get_client", lambda **kwargs: fake)
+
+        result = ingest_document(repo, doc, mode="llm", overwrite=True, second_pass=True)
+        assert "error" not in result, result
+        module_map = repo / ".ai-context" / "curated" / "module-map.md"
+        content = module_map.read_text(encoding="utf-8")
+        assert "Synthesized Module Map" in content
+        assert "Old source module text" in content
+        assert result["routing_coverage"]["sections_routed"] >= 2
+
+
 # ---------------------------------------------------------------------------
 # doc_ingestor — CLAUDE.md update
 # ---------------------------------------------------------------------------
@@ -685,22 +797,30 @@ class TestIngestDocumentLLMFallback:
 class TestClaudeMdUpdate:
     def test_claude_md_created_when_missing(self, repo, md_file):
         claude_md = repo / "CLAUDE.md"
+        claude_dir_md = repo / ".claude" / "CLAUDE.md"
         assert not claude_md.exists()
+        assert not claude_dir_md.exists()
         ingest_document(repo, md_file, overwrite=True, update_claude_md=True)
         assert claude_md.exists()
+        assert claude_dir_md.exists()
         content = claude_md.read_text(encoding="utf-8")
+        agent_content = claude_dir_md.read_text(encoding="utf-8")
         assert "scope-intel-doc-context" in content
+        assert "scope-intel-doc-context" in agent_content
 
     def test_claude_md_not_updated_when_flag_false(self, repo, md_file):
         ingest_document(repo, md_file, overwrite=True, update_claude_md=False)
         assert not (repo / "CLAUDE.md").exists()
+        assert not (repo / ".claude" / "CLAUDE.md").exists()
 
     def test_claude_md_section_replaced_on_rerun(self, repo, md_file):
         ingest_document(repo, md_file, overwrite=True)
         ingest_document(repo, md_file, overwrite=True)
         content = (repo / "CLAUDE.md").read_text(encoding="utf-8")
+        agent_content = (repo / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
         # Marker should appear exactly once (not duplicated)
         assert content.count("<!-- scope-intel-doc-context -->") == 1
+        assert agent_content.count("<!-- scope-intel-doc-context -->") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1192,6 +1312,16 @@ class TestDocCheck:
             assert result["errors"] > 0
             error_files = [i["file"] for i in result["issues"] if i["level"] == "error"]
             assert any(mds[0].name in f for f in error_files)
+
+    def test_check_detects_unindexed_generated_file(self, repo, md_file):
+        from scope_intel.cli import _doc_check
+        ingest_document(repo, md_file, overwrite=True)
+        stale = repo / ".ai-context" / "generated" / "stale-orphan.md"
+        stale.write_text("# Stale\n\nThis file is not in index.json.\n", encoding="utf-8")
+
+        result = _doc_check(repo)
+        warn_files = [i["file"] for i in result["issues"] if i["level"] == "warn"]
+        assert any("stale-orphan.md" in f for f in warn_files)
 
     def test_check_detects_todo_placeholders_in_curated(self, repo, md_file):
         from scope_intel.cli import _doc_check

@@ -33,13 +33,16 @@ def _git_changed_files(repo_root: Path, ref: str) -> tuple:
                 ["git", "-C", str(repo_root), "rev-parse", "--is-inside-work-tree"],
                 stderr=subprocess.DEVNULL,
             )
-        except subprocess.CalledProcessError as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             raise RuntimeError(f"{repo_root} is not a git checkout") from e
 
-    out = subprocess.check_output(
-        ["git", "-C", str(repo_root), "diff", "--name-status", ref],
-        text=True, errors="ignore",
-    )
+    try:
+        out = subprocess.check_output(
+            ["git", "-C", str(repo_root), "diff", "--name-status", ref],
+            text=True, errors="ignore",
+        )
+    except OSError as e:
+        raise RuntimeError(str(e)) from e
     added: list = []
     modified: list = []
     removed: list = []
@@ -64,7 +67,7 @@ def _git_changed_files(repo_root: Path, ref: str) -> tuple:
 def compute_diff_scope(repo_root: Path, ref: str) -> dict:
     try:
         added, modified_files, removed = _git_changed_files(repo_root, ref)
-    except (RuntimeError, subprocess.CalledProcessError) as e:
+    except (RuntimeError, OSError, subprocess.CalledProcessError) as e:
         return {"error": str(e)}
 
     deps = store.read_json(repo_root, "dependencies", {"files": {}}).get("files", {})
