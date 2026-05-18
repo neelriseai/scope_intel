@@ -313,45 +313,67 @@ def _read_docx(path: Path) -> dict:
         table_map = {t._element: t for t in doc.tables}
 
         lines: list[str] = []
+        seen_block_texts: set[str] = set()
+
+        def append_paragraph(para, *, prefix: str = "") -> None:
+            for label in _extract_image_alt_texts(para._element):
+                rendered_image = f"[Image: {label}]"
+                if rendered_image not in seen_block_texts:
+                    lines.append(rendered_image)
+                    seen_block_texts.add(rendered_image)
+
+            text = para.text.strip()
+            if not text:
+                return
+            style = para.style.name or ""
+            if style.startswith("Heading"):
+                try:
+                    level = int(style.split()[-1])
+                except ValueError:
+                    level = 2
+                rendered = "#" * min(level, 4) + " " + text
+            elif style in ("Title",):
+                rendered = "# " + text
+            elif style in ("Subtitle", "Caption"):
+                rendered = f"_{text}_"
+            elif prefix:
+                rendered = f"{prefix}: {text}"
+            else:
+                rendered = text
+
+            if rendered not in seen_block_texts:
+                lines.append(rendered)
+                seen_block_texts.add(rendered)
+
+        def append_table(table, *, prefix: str = "") -> None:
+            md_table = _docx_table_to_markdown(table)
+            if not md_table:
+                return
+            rendered = f"{prefix}:\n{md_table}" if prefix else md_table
+            if rendered not in seen_block_texts:
+                lines.append(rendered)
+                seen_block_texts.add(rendered)
         for child in doc.element.body:
             if child in para_map:
                 para = para_map[child]
-
-                # 1. Image alt-text (may coexist with or replace paragraph text)
-                for label in _extract_image_alt_texts(child):
-                    lines.append(f"[Image: {label}]")
-
-                # 2. Paragraph text
-                text = para.text.strip()
-                if not text:
-                    continue
-                style = para.style.name or ""
-                if style.startswith("Heading"):
-                    # "Heading 1" → #, "Heading 2" → ##, etc.
-                    try:
-                        level = int(style.split()[-1])
-                    except ValueError:
-                        level = 2
-                    lines.append("#" * min(level, 4) + " " + text)
-                elif style in ("Title",):
-                    # Document Title style → h1 (the document heading)
-                    lines.append("# " + text)
-                elif style in ("Subtitle",):
-                    # Document Subtitle → italic paragraph (not a heading,
-                    # but worth preserving as context for the LLM)
-                    lines.append(f"_{text}_")
-                elif style in ("Caption",):
-                    # Figure/table captions → preserve as italic note
-                    lines.append(f"_{text}_")
-                else:
-                    lines.append(text)
+                append_paragraph(para)
 
             elif child in table_map:
-                md_table = _docx_table_to_markdown(table_map[child])
-                if md_table:
-                    lines.append(md_table)
+                append_table(table_map[child])
 
             # else: sectPr, bookmarks, etc. — skip silently
+
+        # Headers and footers are outside doc.element.body, but they often hold
+        # project/version labels that are useful context for classification.
+        for section in doc.sections:
+            for para in section.header.paragraphs:
+                append_paragraph(para, prefix="Header")
+            for table in section.header.tables:
+                append_table(table, prefix="Header")
+            for para in section.footer.paragraphs:
+                append_paragraph(para, prefix="Footer")
+            for table in section.footer.tables:
+                append_table(table, prefix="Footer")
 
         if not lines:
             return {"error": "DOCX produced no text"}

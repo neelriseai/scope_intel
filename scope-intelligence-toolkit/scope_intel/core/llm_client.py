@@ -73,6 +73,25 @@ _CHUNK_CLASSIFY_SCHEMA = """\
   "feature_id": ""
 }"""
 
+_TARGET_CATALOG = """\
+001-project-overview.md: project purpose, product vision, executive summary, user pain.
+002-system-architecture.md: runtime architecture, mode/model routing, prompt caching, technology stack, cost model.
+003-deterministic-engine.md: deterministic parser/processor/engine behavior.
+004-rag-layer.md: retrieval, embeddings, vector stores, semantic search.
+005-memory-layer.md: persistent memory, context records, compression at rest, caches.
+006-validation-engine.md: validation, QA, tests, guardrails, confidence checks.
+007-skill-playbooks.md: skills, playbooks, procedures, workflow instructions.
+008-subagent-strategy.md: subagents, multi-agent delegation, orchestration, thread assembly.
+009-schema-design.md: data models, schemas, payloads, database tables.
+mcp-contract.md: MCP/API/RPC contracts, tool schemas, method signatures.
+roadmap.md: phases, milestones, PMF/proof plans, revenue, unit economics, rollout.
+claude-code-integration.md: Claude Code commands, hooks, agent instructions.
+symbol-schema.md: symbol/type extraction schemas.
+constraints.md: explicit rules, must/never/always constraints.
+current-phase.md: active sprint/current work only.
+module-map.md: explicit module/file ownership maps only.
+skip: references, legal boilerplate, or content with no reusable project context."""
+
 # ---------------------------------------------------------------------------
 # JSON extraction helper
 # ---------------------------------------------------------------------------
@@ -212,6 +231,10 @@ class OllamaClient:
             f"Classify this section from the design document.\n\n"
             f"Document location: {chunk.get('heading_path', chunk.get('title', ''))}\n\n"
             f"Section text:\n{chunk['text'][:2000]}\n\n"
+            "Choose target_file from this catalog. Prefer skip over guessing. "
+            "Use constraints.md, current-phase.md, and module-map.md only when "
+            "the section explicitly belongs to those curated files.\n"
+            f"{_TARGET_CATALOG}\n\n"
             f"Respond with this exact JSON structure:\n{_CHUNK_CLASSIFY_SCHEMA}"
         )
         response = self._generate(prompt, system)

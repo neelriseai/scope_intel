@@ -437,7 +437,7 @@ def compute_churn(repo_root: Path, days: int = 90) -> dict:
         )
         if result.returncode != 0:
             return {"error": "git log failed — is this a git repo?"}
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
         return {"error": str(e)}
 
     churn: dict = {}
@@ -551,7 +551,7 @@ def auto_capture_from_git(
         )
         if result.returncode != 0:
             return {"error": "git log failed — is this a git repo?"}
-    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
         return {"error": str(exc)}
 
     # parse blocks separated by blank lines

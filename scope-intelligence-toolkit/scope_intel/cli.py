@@ -2024,6 +2024,31 @@ def _doc_check(repo: Path) -> dict:
                 issues.append({"level": "error", "file": rel, "msg": str(exc)})
         file_reports.append(fd)
 
+    # --- generated markdown not listed in index.json ---
+    indexed_rels = {
+        str((repo / entry.get("path", "")).relative_to(repo)).replace("\\", "/")
+        for entry in index_files
+        if entry.get("path")
+    }
+    gen_dir = ai_ctx / "generated"
+    if gen_dir.exists():
+        for fpath in sorted(gen_dir.glob("*.md")):
+            rel = str(fpath.relative_to(repo)).replace("\\", "/")
+            if rel in indexed_rels:
+                continue
+            try:
+                chars = len(fpath.read_text(encoding="utf-8"))
+            except OSError:
+                chars = None
+            msg = "generated markdown exists on disk but is not listed in index.json"
+            fd = {"path": rel, "layer": "generated", "title": "", "issues": [
+                {"level": "warn", "msg": msg}
+            ]}
+            if chars is not None:
+                fd["chars"] = chars
+            file_reports.append(fd)
+            issues.append({"level": "warn", "file": rel, "msg": msg})
+
     # --- curated files ---
     CURATED_EXPECTED = ["constraints.md", "current-phase.md", "module-map.md"]
     cur_dir = ai_ctx / "curated"
