@@ -70,6 +70,15 @@ from .core.tracker import (
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "CLAUDE.md.tmpl"
 
 
+def _configure_stdout() -> None:
+    """Keep Unicode CLI formatting usable on legacy Windows consoles."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
@@ -4845,6 +4854,7 @@ HANDLERS = {
 
 
 def main(argv=None) -> int:
+    _configure_stdout()
     parser = build_parser()
     args = parser.parse_args(argv)
     return HANDLERS[args.cmd](args)
