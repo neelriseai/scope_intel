@@ -391,6 +391,18 @@ class TestRouteSection:
         assert slug == "skill-playbooks"
         assert prefix == "007"
 
+    def test_reasoning_refinement_routes_to_skill_playbooks(self):
+        dest, prefix, slug = _route_section("Reasoning and Refinement Layers", "crow inference metacognition")
+        assert dest == "generated"
+        assert slug == "skill-playbooks"
+        assert prefix == "007"
+
+    def test_p0_p1_p2_execution_plan_routes_to_roadmap(self):
+        dest, prefix, slug = _route_section("Dhi P0/P1/P2 Execution Plan", "current implementation phases")
+        assert dest == "generated"
+        assert slug == "roadmap"
+        assert prefix is None
+
     def test_prompt_caching_routes_to_architecture(self):
         dest, prefix, slug = _route_section(
             "4.3 Prompt Caching",

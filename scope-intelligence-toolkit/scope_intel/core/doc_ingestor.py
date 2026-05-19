@@ -172,11 +172,11 @@ GENERATED_ROUTES: list[tuple] = [
     # Cost/model/runtime architecture sections.
     (r"\bprompt caching\b|\bhierarchical model routing\b|\bmodel routing\b|\btoken cost\b|\bcost reference\b|\btechnology stack\b|\btech stack\b|\btwo.mode model\b|\bthread output assembly\b", "002", "system-architecture"),
     # Roadmap: "\broadmap\b" is unique; "milestone", "phase plan" are specific
-    (r"\broadmap\b|\bphase plan\b|\bmilestone\b|\brelease plan\b|\bbacklog\b|\bsprint", None, "roadmap"),
+    (r"\broadmap\b|\bphase plan\b|\bmilestone\b|\brelease plan\b|\bexecution plan\b|\bp0\b|\bp1\b|\bp2\b|\bbacklog\b|\bsprint", None, "roadmap"),
     # RAG: very distinctive vocabulary
     (r"\brag\b|\bretrieval.augmented\b|\bvector store\b|\bembedding\b|\bsemantic search\b", "004", "rag-layer"),
     # Skills / playbooks
-    (r"\bskill\b|\bplaybook\b|\bworkflow\b|\bprocedure\b|\brecipe\b|\bstep.by.step|\bshopping\b|\bcod order\b|\border assist\b|\bcommerce assist\b|\bcheckout\b|\bmarketplace\b", "007", "skill-playbooks"),
+    (r"\bskill\b|\bplaybook\b|\bworkflow\b|\bprocedure\b|\brecipe\b|\bstep.by.step|\bshopping\b|\bcod order\b|\border assist\b|\bcommerce assist\b|\bcheckout\b|\bmarketplace\b|\breasoning and refinement\b|\bmetacognition\b|\binference\b|\brefinement\b", "007", "skill-playbooks"),
     # Subagents: multi-agent is specific
     (r"\bsubagent\b|\bmulti.agent\b|\bdelegat\b|\bcoordinat\b|\borchestrat", "008", "subagent-strategy"),
     # Claude / MCP integration
