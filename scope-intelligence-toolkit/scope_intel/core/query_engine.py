@@ -105,18 +105,34 @@ def get_related_tests(repo_root: Path, *, file: Optional[str] = None,
                       feature: Optional[str] = None) -> dict:
     data = _load(repo_root)
     tests = data["tests"]["tests"]
+    deps = data["dependencies"]["files"]
     matches: list = []
+    seen_files: set[str] = set()
+
+    def add_match(test: dict) -> None:
+        test_file = test["file"]
+        if test_file not in seen_files:
+            seen_files.add(test_file)
+            matches.append(test)
+
     if file:
         for t in tests:
             if file in (t.get("covers_files") or []) or t["file"] == file:
-                matches.append(t)
+                add_match(t)
+        if file in deps:
+            impacted = collect_impacted(data["state"], deps, [file])
+            impacted_files = set(impacted.get("direct", [])) | set(impacted.get("transitive", []))
+            for t in tests:
+                covered = set(t.get("covers_files") or [])
+                if t["file"] in impacted_files or covered.intersection(impacted_files):
+                    add_match(t)
     if feature:
         feat = _resolve_feature(feature, data["features"]["features"], data["aliases"])
         if feat:
             fid = feat["id"]
             for t in tests:
-                if fid in (t.get("covers_features") or []) and t not in matches:
-                    matches.append(t)
+                if fid in (t.get("covers_features") or []):
+                    add_match(t)
     if not matches:
         return {"matches": [], "note": "No related tests found via covers_files/covers_features."}
     return {

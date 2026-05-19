@@ -85,6 +85,11 @@ def repo(tmp_path):
         'def test_validate(): assert validate("tok")\n',
         encoding="utf-8",
     )
+    (tmp_path / "tests" / "test_billing.py").write_text(
+        'from src.billing.payment import charge\n'
+        'def test_charge(): assert charge("tok", 10)["status"] == "ok"\n',
+        encoding="utf-8",
+    )
 
     store.ensure_index_dir(tmp_path)
     store.write_json(tmp_path, "config", store.default_config())
@@ -165,6 +170,10 @@ class TestQueryEngine:
     def test_related_tests_by_file(self, repo):
         r = get_related_tests(repo, file="src/auth/login.py")
         assert any("test_auth" in m["file"] for m in r.get("matches", []))
+
+    def test_related_tests_by_transitive_file_impact(self, repo):
+        r = get_related_tests(repo, file="src/auth/login.py")
+        assert any("test_billing" in m["file"] for m in r.get("matches", []))
 
     def test_related_tests_by_feature(self, repo):
         r = get_related_tests(repo, feature="auth")
