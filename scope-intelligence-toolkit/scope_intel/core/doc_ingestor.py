@@ -176,13 +176,13 @@ GENERATED_ROUTES: list[tuple] = [
     # RAG: very distinctive vocabulary
     (r"\brag\b|\bretrieval.augmented\b|\bvector store\b|\bembedding\b|\bsemantic search\b", "004", "rag-layer"),
     # Skills / playbooks
-    (r"\bskill\b|\bplaybook\b|\bworkflow\b|\bprocedure\b|\brecipe\b|\bstep.by.step", "007", "skill-playbooks"),
+    (r"\bskill\b|\bplaybook\b|\bworkflow\b|\bprocedure\b|\brecipe\b|\bstep.by.step|\bshopping\b|\bcod order\b|\border assist\b|\bcommerce assist\b|\bcheckout\b|\bmarketplace\b", "007", "skill-playbooks"),
     # Subagents: multi-agent is specific
     (r"\bsubagent\b|\bmulti.agent\b|\bdelegat\b|\bcoordinat\b|\borchestrat", "008", "subagent-strategy"),
     # Claude / MCP integration
     (r"\bclaude.code\b|\bclaude integration\b|\bslash command\b|\bhook\b|\bmcp server\b", None, "claude-code-integration"),
     # MCP contract / API — specific keywords
-    (r"\bmcp contract\b|\bapi contract\b|\bjson.rpc\b|\brpc method\b|\bmethod signature\b|\btool schema\b", None, "mcp-contract"),
+    (r"\bmcp contract\b|\bapi contract\b|\bjson.rpc\b|\brpc method\b|\bmethod signature\b|\btool schema\b|\bbrowser bridge\b|\bbrowser extension\b|\bactive.tab\b|\bbridge server\b", None, "mcp-contract"),
     # Symbol schema — very specific terms
     (r"\bsymbol schema\b|\btype definition\b|\bdata type system\b|\binterface definition\b", None, "symbol-schema"),
     # --- Moderately specific compound patterns ---

@@ -379,6 +379,18 @@ class TestRouteSection:
         assert dest == "generated"
         assert slug == "schema-design"
 
+    def test_browser_bridge_routes_to_contract_context(self):
+        dest, prefix, slug = _route_section("Dhi Browser Bridge", "extension observes active tab")
+        assert dest == "generated"
+        assert slug == "mcp-contract"
+        assert prefix is None
+
+    def test_shopping_cod_routes_to_skill_playbooks(self):
+        dest, prefix, slug = _route_section("Shopping And COD Order Assist", "marketplace comparison checkout workflow")
+        assert dest == "generated"
+        assert slug == "skill-playbooks"
+        assert prefix == "007"
+
     def test_prompt_caching_routes_to_architecture(self):
         dest, prefix, slug = _route_section(
             "4.3 Prompt Caching",
