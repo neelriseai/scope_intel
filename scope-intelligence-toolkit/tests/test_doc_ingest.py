@@ -921,6 +921,19 @@ class TestDocSearch:
         result = _doc_search(repo, "anything")
         assert "error" in result
 
+    def test_search_reads_project_todo_without_ai_context(self, repo):
+        (repo / "TODO.md").write_text(
+            "# Roadmap\n\n- [ ] Build production ready commerce resume flow.\n",
+            encoding="utf-8",
+        )
+
+        result = _doc_search(repo, "production ready")
+
+        assert "error" not in result, result
+        assert result["total_matches"] == 1
+        assert result["results"][0]["layer"] == "project"
+        assert result["results"][0]["path"] == "TODO.md"
+
     def test_search_finds_keyword(self, repo, md_file):
         ingest_document(repo, md_file, overwrite=True)
         # SAMPLE_MD has "Redis" in the Memory Layer section
@@ -1571,6 +1584,19 @@ class TestDocFetchFor:
         result = _doc_fetch_for(repo, "roadmap")
         total = result["total_doc_files"] + result["total_doc_excerpts"]
         assert total > 0, "expected at least one doc_files or doc_search hit for 'roadmap'"
+
+    def test_fetch_for_reads_project_todo_without_ai_context(self, repo):
+        (repo / "TODO.md").write_text(
+            "# Dhi Build TODO\n\n- [ ] Resume commerce session from compact DSL.\n",
+            encoding="utf-8",
+        )
+
+        result = _doc_fetch_for(repo, "commerce session")
+
+        assert "error" not in result
+        assert result["total_doc_excerpts"] == 1
+        assert result["doc_search"][0]["layer"] == "project"
+        assert result["doc_search"][0]["path"] == "TODO.md"
 
     def test_doc_files_matched_by_filename(self, repo, tmp_path):
         """A .ai-context/ file whose stem contains the slug should appear in doc_files."""

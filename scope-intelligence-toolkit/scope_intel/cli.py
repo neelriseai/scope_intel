@@ -2997,15 +2997,15 @@ def _doc_fetch_for(
                         "chars":   len(content),
                     })
 
-        # --- 2. Search .ai-context/ for mentions of the feature name ---
-        search_r = _doc_search(repo, feature, layer="all", context_lines=2)
-        if "error" not in search_r:
-            # Exclude files already returned in doc_files to avoid duplication
-            existing_paths = {f["path"] for f in result["doc_files"]}
-            result["doc_search"] = [
-                r for r in search_r.get("results", [])
-                if r["path"] not in existing_paths
-            ]
+    # --- 2. Search .ai-context/ and project docs for mentions of the feature name ---
+    search_r = _doc_search(repo, feature, layer="all", context_lines=2)
+    if "error" not in search_r:
+        # Exclude files already returned in doc_files to avoid duplication
+        existing_paths = {f["path"] for f in result["doc_files"]}
+        result["doc_search"] = [
+            r for r in search_r.get("results", [])
+            if r["path"] not in existing_paths
+        ]
 
     # --- 3. Fetch relevant memories ---
     if include_memories:
@@ -3280,7 +3280,8 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
     Each match has {line_no, line, context_before[], context_after[]}.
     """
     ai_ctx = repo / ".ai-context"
-    if not ai_ctx.exists():
+    project_docs = _project_doc_paths(repo)
+    if not ai_ctx.exists() and not project_docs:
         return {"error": "no .ai-context/ found — run `scope doc ingest` first"}
 
     import re as _re
@@ -3313,46 +3314,53 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
                 if tag_filter in tags:
                     allowed_paths.add(rel)
 
+    def _search_file(p: Path, lyr: str) -> None:
+        rel = str(p.relative_to(repo)).replace("\\", "/")
+        if allowed_paths is not None and rel not in allowed_paths:
+            return  # tag filter excludes this file
+        try:
+            lines = p.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        matches: list[dict] = []
+        for i, line in enumerate(lines):
+            if pattern.search(line):
+                before = lines[max(0, i - context_lines): i]
+                after  = lines[i + 1: i + 1 + context_lines]
+                matches.append({
+                    "line_no":        i + 1,
+                    "line":           line,
+                    "context_before": before,
+                    "context_after":  after,
+                })
+        if matches:
+            results.append({
+                "file_id": p.stem,
+                "path":    rel,
+                "layer":   lyr,
+                "matches": matches,
+                "match_count": len(matches),
+            })
+
     def _search_dir(directory: Path, lyr: str) -> None:
         if not directory.exists():
             return
         for p in sorted(directory.glob("*.md")):
-            rel = str(p.relative_to(repo)).replace("\\", "/")
-            if allowed_paths is not None and rel not in allowed_paths:
-                continue  # tag filter excludes this file
-            try:
-                lines = p.read_text(encoding="utf-8").splitlines()
-            except OSError:
-                continue
-            matches: list[dict] = []
-            for i, line in enumerate(lines):
-                if pattern.search(line):
-                    before = lines[max(0, i - context_lines): i]
-                    after  = lines[i + 1: i + 1 + context_lines]
-                    matches.append({
-                        "line_no":        i + 1,
-                        "line":           line,
-                        "context_before": before,
-                        "context_after":  after,
-                    })
-            if matches:
-                results.append({
-                    "file_id": p.stem,
-                    "path":    rel,
-                    "layer":   lyr,
-                    "matches": matches,
-                    "match_count": len(matches),
-                })
+            _search_file(p, lyr)
 
     if layer in ("generated", "all"):
         _search_dir(ai_ctx / "generated", "generated")
     if layer in ("curated", "all"):
         _search_dir(ai_ctx / "curated", "curated")
+    if layer == "all" and allowed_paths is None:
+        for p in project_docs:
+            _search_file(p, "project")
 
     total_matches = sum(r["match_count"] for r in results)
     total_candidate_files = (
         len(list((ai_ctx / "generated").glob("*.md")) if (ai_ctx / "generated").exists() else [])
         + len(list((ai_ctx / "curated").glob("*.md")) if (ai_ctx / "curated").exists() else [])
+        + (len(project_docs) if layer == "all" and allowed_paths is None else 0)
     )
     return {
         "query":         query,
@@ -3363,6 +3371,31 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
         "total_matches": total_matches,
         "results":       results,
     }
+
+
+def _project_doc_paths(repo: Path) -> list[Path]:
+    names = (
+        "README.md",
+        "README.txt",
+        "TODO.md",
+        "TODO.txt",
+        "AGENTS.md",
+        "CLAUDE.md",
+    )
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for name in names:
+        p = repo / name
+        if p.is_file() and p not in seen:
+            seen.add(p)
+            result.append(p)
+    docs_dir = repo / "docs"
+    if docs_dir.exists():
+        for p in sorted(docs_dir.rglob("*.md")):
+            if p.is_file() and p not in seen:
+                seen.add(p)
+                result.append(p)
+    return result
 
 
 def _fmt_doc_search(r: dict) -> None:
