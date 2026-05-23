@@ -227,6 +227,24 @@ The generated layout:
 Original `.ai-context` files are human-readable and canonical. Compact sidecars
 are optional agent-facing artifacts.
 
+### Governance Scaffold
+
+For product work that must preserve a strategy, philosophy, and review loop
+across AI sessions, create curated governance files:
+
+```bash
+scope doc governance --repo .
+scope doc governance --repo . --dry-run
+```
+
+The scaffold writes `.ai-context/curated/001-product-philosophy.md`,
+`004-skill-contracts.md`, `005-quality-gates.md`,
+`007-review-loop-instructions.md`, `008-product-invariants.md`,
+`009-do-not-simplify.md`, `010-hidden-gems.md`, and
+`011-architecture-decisions.md`. Existing files are skipped by default so human
+curation is not overwritten; use `--overwrite` only when you intentionally want
+to refresh the templates.
+
 ### Compact Sidecars
 
 Compact sidecars are designed for your exact concern: reduce what agents read

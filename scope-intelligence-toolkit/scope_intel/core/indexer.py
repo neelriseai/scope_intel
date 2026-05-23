@@ -74,7 +74,8 @@ def _infer_feature(rel_posix: str, feature_roots: list, overrides: dict) -> Opti
 def _walk_repo(repo_root: Path, ignore_globs: list, max_kb: int) -> Iterable[Path]:
     skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv",
                  "dist", "build", "target", "out", store.INDEX_DIR_NAME,
-                 ".idea", ".vscode"}
+                 ".idea", ".vscode", ".pytest_cache", ".mypy_cache",
+                 ".ruff_cache", ".tox", ".nox", ".test-tmp", "artifacts"}
     for p in repo_root.rglob("*"):
         if not p.is_file():
             continue

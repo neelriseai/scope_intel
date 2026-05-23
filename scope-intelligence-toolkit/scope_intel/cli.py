@@ -51,6 +51,7 @@ from .core.mempalace import (
     touch_memory,
 )
 from .core.doc_ingestor import ingest_document
+from .core.governance import scaffold_governance_context
 from .core.compact_context import (
     build_compact_artifacts,
     compact_stats,
@@ -642,6 +643,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_touch.add_argument("--author", default="", help="Author name to record on the annotation.")
     p_touch.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
     p_touch.add_argument("--json", action="store_true", help="Emit raw JSON result.")
+
+    # doc governance — scaffold curated agent-control files
+    p_gov = doc_sub.add_parser(
+        "governance",
+        help="Scaffold curated .ai-context governance files for disciplined agent improvement.",
+    )
+    p_gov.add_argument("--repo", default=".", help="Target repo root (default: cwd).")
+    p_gov.add_argument("--overwrite", action="store_true", help="Overwrite existing curated files.")
+    p_gov.add_argument("--dry-run", action="store_true", help="Report files without writing them.")
+    p_gov.add_argument("--json", action="store_true", help="Emit raw JSON result.")
 
     # doc snapshot — named point-in-time checkpoints of .ai-context/ file hashes
     p_snap = doc_sub.add_parser(
@@ -2943,6 +2954,24 @@ def _fmt_doc_annotate(r: dict) -> None:
         print(f"       {ann['note']}")
 
 
+def _fmt_doc_governance(r: dict) -> None:
+    if "error" in r:
+        print(r["error"]); return
+    print(f"governance context: {r['target_dir']}")
+    print(f"  planned={len(r.get('planned', []))}  written={len(r.get('written', []))}  skipped={len(r.get('skipped', []))}")
+    if r.get("dry_run"):
+        print("  dry run: no files written")
+    written_label = "would write" if r.get("dry_run") else "wrote"
+    for path in r.get("written", []):
+        print(f"  {written_label:<11} {path}")
+    for path in r.get("skipped", []):
+        print(f"  skipped {path}")
+    if r.get("next_steps"):
+        print("next steps:")
+        for step in r["next_steps"]:
+            print(f"  - {step}")
+
+
 def _doc_fetch_for(
     repo: Path,
     feature: str,
@@ -4559,6 +4588,16 @@ def cmd_doc(args) -> int:
         repo = _resolve_repo(args.repo)
         result = _doc_touch(repo, args.name, reason=args.reason, author=args.author)
         _emit(result, args.json, formatter=_fmt_doc_annotate)
+        return 0 if "error" not in result else 2
+
+    if args.doc_cmd == "governance":
+        repo = _resolve_repo(args.repo)
+        result = scaffold_governance_context(
+            repo,
+            overwrite=args.overwrite,
+            dry_run=args.dry_run,
+        )
+        _emit(result, args.json, formatter=_fmt_doc_governance)
         return 0 if "error" not in result else 2
 
     if args.doc_cmd == "ingest-watch":

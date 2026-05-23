@@ -37,6 +37,8 @@ from scope_intel.core.doc_ingestor import (
     _CURATED_TEMPLATES,
     ingest_document,
 )
+from scope_intel.core.governance import scaffold_governance_context
+from scope_intel.cli import main as scope_main
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +102,39 @@ def repo(tmp_path) -> Path:
     store.write_json(tmp_path, "config", store.default_config())
     build_index(tmp_path)
     return tmp_path
+
+
+# ---------------------------------------------------------------------------
+# governance scaffold
+# ---------------------------------------------------------------------------
+
+class TestGovernanceScaffold:
+    def test_scaffolds_curated_agent_control_files_without_overwriting(self, repo):
+        result = scaffold_governance_context(repo)
+
+        assert result["ok"] is True
+        assert ".ai-context/curated/001-product-philosophy.md" in result["written"]
+        assert ".ai-context/curated/008-product-invariants.md" in result["written"]
+        philosophy = repo / ".ai-context" / "curated" / "001-product-philosophy.md"
+        invariants = repo / ".ai-context" / "curated" / "008-product-invariants.md"
+        assert "Accuracy first, cheap path preferred" in philosophy.read_text(encoding="utf-8")
+        assert "Core invariant" in invariants.read_text(encoding="utf-8")
+
+        philosophy.write_text("custom philosophy", encoding="utf-8")
+        second = scaffold_governance_context(repo)
+
+        assert ".ai-context/curated/001-product-philosophy.md" in second["skipped"]
+        assert philosophy.read_text(encoding="utf-8") == "custom philosophy"
+
+    def test_governance_cli_dry_run_reports_planned_files(self, repo, capsys):
+        code = scope_main(["doc", "governance", "--repo", str(repo), "--dry-run"])
+
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "governance context" in out
+        assert "dry run: no files written" in out
+        assert "001-product-philosophy.md" in out
+        assert not (repo / ".ai-context" / "curated" / "001-product-philosophy.md").exists()
 
 
 # ---------------------------------------------------------------------------

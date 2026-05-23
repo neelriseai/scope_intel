@@ -139,6 +139,30 @@ class TestIndex:
         result = build_index(repo, only_files=["src/auth/login.py"])
         assert result["files"] >= 1
 
+    def test_index_ignores_generated_artifact_dirs(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.py").write_text("def run(): return 1\n", encoding="utf-8")
+        (tmp_path / ".test-tmp" / "pytest").mkdir(parents=True)
+        (tmp_path / ".test-tmp" / "pytest" / "leaked.py").write_text(
+            "def should_not_index(): return 2\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "artifacts" / "reports").mkdir(parents=True)
+        (tmp_path / "artifacts" / "reports" / "report.py").write_text(
+            "def generated_report(): return 3\n",
+            encoding="utf-8",
+        )
+        store.ensure_index_dir(tmp_path)
+        store.write_json(tmp_path, "config", store.default_config())
+
+        result = build_index(tmp_path)
+        files = store.read_json(tmp_path, "dependencies", {})["files"]
+
+        assert result["files"] == 1
+        assert "src/main.py" in files
+        assert not any(path.startswith(".test-tmp/") for path in files)
+        assert not any(path.startswith("artifacts/") for path in files)
+
 
 class TestQueryEngine:
     def test_repo_summary(self, repo):
