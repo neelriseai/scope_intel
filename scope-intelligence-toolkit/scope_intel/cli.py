@@ -3286,7 +3286,11 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
 
     import re as _re
     try:
-        raw_pattern = query if use_regex else _re.escape(query)
+        if use_regex:
+            raw_pattern = query
+        else:
+            tokens = [token for token in _re.split(r"\s+", query.strip()) if token]
+            raw_pattern = "|".join(_re.escape(token) for token in tokens) if len(tokens) > 1 else _re.escape(query)
         pattern = _re.compile(raw_pattern, _re.IGNORECASE)
     except _re.error as exc:
         return {"error": f"invalid regex pattern: {exc}"}
@@ -3323,6 +3327,13 @@ def _doc_search(repo: Path, query: str, *, layer: str = "all",
         except OSError:
             return
         matches: list[dict] = []
+        if pattern.search(rel):
+            matches.append({
+                "line_no":        0,
+                "line":           f"[path] {rel}",
+                "context_before": [],
+                "context_after":  [],
+            })
         for i, line in enumerate(lines):
             if pattern.search(line):
                 before = lines[max(0, i - context_lines): i]
@@ -3389,12 +3400,13 @@ def _project_doc_paths(repo: Path) -> list[Path]:
         if p.is_file() and p not in seen:
             seen.add(p)
             result.append(p)
-    docs_dir = repo / "docs"
-    if docs_dir.exists():
-        for p in sorted(docs_dir.rglob("*.md")):
-            if p.is_file() and p not in seen:
-                seen.add(p)
-                result.append(p)
+    for docs_dir in (repo / "docs", repo / "architecture", repo / "Document reference"):
+        if docs_dir.exists():
+            for pattern in ("*.md", "*.txt"):
+                for p in sorted(docs_dir.rglob(pattern)):
+                    if p.is_file() and p not in seen:
+                        seen.add(p)
+                        result.append(p)
     return result
 
 

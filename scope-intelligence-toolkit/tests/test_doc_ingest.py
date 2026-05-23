@@ -934,6 +934,29 @@ class TestDocSearch:
         assert result["results"][0]["layer"] == "project"
         assert result["results"][0]["path"] == "TODO.md"
 
+    def test_search_multi_word_topic_finds_any_project_doc_token(self, repo):
+        (repo / "TODO.md").write_text("# Roadmap\n\n- [ ] Build commerce flow.\n", encoding="utf-8")
+        arch = repo / "architecture"
+        arch.mkdir()
+        (arch / "SOLUTION_DESIGN_AUDIT.md").write_text("# Audit\n\nMemory and proactive design notes.\n", encoding="utf-8")
+
+        result = _doc_search(repo, "SOLUTION_DESIGN_AUDIT TODO PocketAIAgent")
+
+        assert "error" not in result, result
+        paths = {item["path"] for item in result["results"]}
+        assert "TODO.md" in paths
+        assert "architecture/SOLUTION_DESIGN_AUDIT.md" in paths
+
+    def test_search_reads_document_reference_txt_without_ai_context(self, repo):
+        refs = repo / "Document reference"
+        refs.mkdir()
+        (refs / "PS file Rq Rs.txt").write_text("PowerShell run response for Dhi testing.\n", encoding="utf-8")
+
+        result = _doc_search(repo, "PowerShell Dhi")
+
+        assert "error" not in result, result
+        assert result["results"][0]["path"] == "Document reference/PS file Rq Rs.txt"
+
     def test_search_finds_keyword(self, repo, md_file):
         ingest_document(repo, md_file, overwrite=True)
         # SAMPLE_MD has "Redis" in the Memory Layer section
