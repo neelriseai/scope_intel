@@ -31,3 +31,8 @@ scope-report.html
 # OS
 .DS_Store
 Thumbs.db
+
+# Machine-local Claude Code settings and generated scope artifacts
+.claude/settings.local.json
+scope-intelligence-toolkit/.scope-intelligence/
+scope-intelligence-toolkit/.test-tmp/

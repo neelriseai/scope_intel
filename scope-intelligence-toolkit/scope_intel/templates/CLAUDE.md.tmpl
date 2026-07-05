@@ -1,23 +1,149 @@
-# Scope Intelligence rules for Claude Code
+# Scope Intelligence — rules for Claude Code
 
-This repo has a local scope index at `.scope-intelligence/`. Use it before
-scanning the codebase by hand.
+This repo has a pre-built scope index at `.scope-intelligence/`.
+ALWAYS query it before reading source files, scanning directories, or making
+any edit. Every coding task must follow the phases below.
 
-Workflow:
-1. Before debugging, enhancement, or refactoring, query the scope index first.
-2. Use the smallest feature/module scope possible. Do not load unrelated files.
-3. After making changes, run `scope update --files <changed>` to refresh.
+---
 
-Useful commands (run from the repo root):
+## Phase 1 — Orient (run before touching anything)
 
-    scope summary                       # repo overview (compact)
-    scope feature <name-or-alias>       # files, symbols, tests for a feature
-    scope impacted --file <path>        # files transitively affected by a change
-    scope impacted --symbol <name>      # blast radius of a symbol change
-    scope tests --file <path>           # related tests for a file
-    scope tests --feature <name>        # related tests for a feature
-    scope symbol <name>                 # callers + callees of a symbol
-    scope update --files <a> <b> ...    # incremental re-index after edits
+```
+scope summary                        # repo size, languages, top features
+scope inventory --repo .             # file/class/symbol roster without reading source
+scope mem fetch --feature <name>     # past decisions, bugs, patterns for this feature
+scope doc fetch-for <name>           # design-doc context for this feature
+```
 
-Stored data is JSON only — no source code. Safe to commit if you want to
-share the scope map with the team.
+Use `inventory` as your first file-map. It shows every class and symbol in the
+repo without spending tokens on source bodies. Only fetch source after inventory
+tells you which files matter.
+
+If `.ai-context/compact/` exists, read compact sidecars first:
+  - Sidecars are at `.ai-context/compact/generated/*.scope`
+  - Read the DSL block; fetch the original only when full detail is needed.
+
+---
+
+## Phase 2 — Scope the task (pick the right query for the task type)
+
+**Bug fix**
+```
+scope feature <feature>              # identify the relevant feature
+scope symbol <failing-symbol>        # callers + callees of the broken symbol
+scope impacted --symbol <name>       # blast radius before touching it
+scope tests --feature <feature>      # exact test set to run
+```
+
+**New feature / adding code**
+```
+scope features                       # check if a related feature already exists
+scope touchpoints                    # routes, config keys, DB models, events to be aware of
+scope inventory --feature <nearest>  # nearest existing feature's file/symbol roster
+scope graph <feature> --kind deps    # dependency graph — see what you'd plug into
+scope mem fetch --feature <name>     # prior decisions and gotchas
+```
+
+**Refactor / rename / move**
+```
+scope impacted --symbol <name>       # full transitive blast radius BEFORE touching
+scope callers <name>                 # every call site
+scope callees <name>                 # every dependency of this symbol
+scope graph <name> --kind calls      # visual call graph
+scope tests --feature <feature>      # tests to keep green
+```
+
+**Dependency / import change**
+```
+scope impacted --file <path>         # who imports this file transitively
+scope touchpoints                    # check if file is a route, config, or schema
+scope diff HEAD~1                    # what else changed recently in this area
+```
+
+**Test writing**
+```
+scope tests --feature <feature>      # existing test coverage — avoid duplication
+scope symbol <name>                  # understand the symbol's contract before mocking
+scope inventory --feature <feature> --no-symbols   # file roster only, fast
+```
+
+**Architecture / design work**
+```
+scope graph <feature> --kind deps    # Mermaid dependency graph
+scope graph <symbol> --kind calls    # call graph for a key entry point
+scope doc search "<topic>"           # search design docs for prior decisions
+scope doc fetch-for <feature>        # full design-doc context for this area
+```
+
+---
+
+## Phase 3 — Code
+
+- Read ONLY files returned by Phase 2 queries.
+- Do NOT glob or `ls` the repo. Do NOT open files not in scope query results.
+- If a file seems relevant but wasn't returned, run `scope impacted` or
+  `scope symbol` on it before opening it — the index may already explain why.
+- Make the smallest change that satisfies the task. One feature, one concern.
+
+---
+
+## Phase 4 — Verify
+
+```
+scope tests --feature <feature>       # get the exact test command to run
+scope impacted --file <changed-file>  # confirm no unexpected blast radius
+```
+
+Run only the tests returned by `scope tests`. Do not run the full suite unless
+`scope impacted` shows cross-feature impact.
+
+---
+
+## Phase 5 — Update index and capture memory
+
+```
+scope update --repo . --files <every file you changed or created>
+```
+
+If you discovered something stable and reusable — a bug pattern, an architectural
+rule, a non-obvious constraint — capture it:
+
+```
+scope mem capture --signal validated-claim --evidence "<what you found>" --feature <name>
+```
+
+Or for a richer entry:
+```
+scope mem add --type semantic --note "<fact>" --feature <name> --confidence 0.9
+scope mem add --type bug      --file <path>  --note "<what broke and why>"
+scope mem add --type decision --note "<why this approach was chosen>"
+```
+
+---
+
+## Hard rules
+
+- NEVER scan the whole repo with find/glob/ls before querying scope.
+- NEVER open a file just to understand what it does — use `scope symbol` or
+  `scope inventory` first.
+- NEVER skip `scope impacted` before editing a shared utility, base class,
+  or widely-imported module.
+- If scope returns no results for a query, THEN fall back to source reads —
+  and immediately run `scope update` afterwards so the index learns the new file.
+- After any bulk edit (rename, move, delete), always run `scope index .` to
+  rebuild, not `scope update` — update is for single-file incremental changes.
+
+---
+
+## When scope cannot answer
+
+Escalation ladder — stop at the first level that answers:
+1. `scope inventory` — shape of repo, file/class/symbol list
+2. `scope feature` / `scope symbol` — focused source context
+3. `scope doc fetch-for` / `scope doc search` — design intent
+4. `scope mem fetch` / `scope mem search` — past lessons
+5. Read source directly — only after all above are exhausted
+
+---
+
+Stored data is JSON/JSONL only — no source code bodies. Safe to commit.
