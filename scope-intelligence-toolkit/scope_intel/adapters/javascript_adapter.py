@@ -36,6 +36,34 @@ METHOD_RE = re.compile(r'^\s+(?:async\s+|static\s+|public\s+|private\s+|protecte
 
 TEST_BLOCK_RE = re.compile(r'\b(?:test|it)\s*\(\s*["\'`]([^"\'`]+)["\'`]')
 
+CALL_RE = re.compile(r'\b([A-Za-z_$][\w$]*)\s*\(')
+# Keywords/builtins that look like calls but are noise for a call graph.
+_CALL_NOISE = frozenset(
+    """if for while switch catch return function await async new typeof delete void
+    require import super constructor Promise Array Object String Number Boolean
+    JSON Math Date RegExp Error Map Set Symbol parseInt parseFloat isNaN
+    setTimeout setInterval clearTimeout clearInterval fetch console alert
+    escape unescape encodeURIComponent decodeURIComponent""".split()
+)
+
+
+def _collect_js_calls(span: str) -> list:
+    """Call names inside one function's span, minus keywords and duplicates.
+
+    The resolver keeps only names that match known symbols, so over-collection
+    is safe; the noise list just keeps the raw payload small.
+    """
+
+    seen: set = set()
+    calls: list = []
+    for m in CALL_RE.finditer(span):
+        name = m.group(1)
+        if name in _CALL_NOISE or name in seen:
+            continue
+        seen.add(name)
+        calls.append(name)
+    return calls
+
 
 class JavaScriptAdapter(LanguageAdapter):
     name = "javascript"
@@ -59,31 +87,34 @@ class JavaScriptAdapter(LanguageAdapter):
         for m in IMPORT_RE.finditer(cleaned):
             imports_raw.append(m.group(1) or m.group(2))
 
-        symbols: list = []
+        # Collect (char_offset, symbol) so each function gets a source span:
+        # from its own match to the next top-level symbol. Spans feed the
+        # call-edge extraction that makes callers/callees work for JS.
+        found: list = []
         for m in CLASS_RE.finditer(cleaned):
-            symbols.append(ParsedSymbol(
+            found.append((m.start(), ParsedSymbol(
                 name=m.group(1), kind="class",
                 line=cleaned[:m.start()].count("\n") + 1,
                 qualified_name=m.group(1),
-            ))
-        for m in EXPORT_FN_RE.finditer(cleaned):
-            params = [p.strip().split(":")[0].split("=")[0].strip()
-                      for p in m.group(2).split(",") if p.strip()]
-            symbols.append(ParsedSymbol(
-                name=m.group(1), kind="function",
-                line=cleaned[:m.start()].count("\n") + 1,
-                qualified_name=m.group(1),
-                params=params,
-            ))
-        for m in ARROW_FN_RE.finditer(cleaned):
-            params = [p.strip().split(":")[0].split("=")[0].strip()
-                      for p in m.group(2).split(",") if p.strip()]
-            symbols.append(ParsedSymbol(
-                name=m.group(1), kind="function",
-                line=cleaned[:m.start()].count("\n") + 1,
-                qualified_name=m.group(1),
-                params=params,
-            ))
+            )))
+        for pattern in (EXPORT_FN_RE, ARROW_FN_RE):
+            for m in pattern.finditer(cleaned):
+                params = [p.strip().split(":")[0].split("=")[0].strip()
+                          for p in m.group(2).split(",") if p.strip()]
+                found.append((m.start(), ParsedSymbol(
+                    name=m.group(1), kind="function",
+                    line=cleaned[:m.start()].count("\n") + 1,
+                    qualified_name=m.group(1),
+                    params=params,
+                )))
+        found.sort(key=lambda item: item[0])
+        symbols: list = []
+        for index, (start, symbol) in enumerate(found):
+            if symbol.kind == "function":
+                end = found[index + 1][0] if index + 1 < len(found) else len(cleaned)
+                span = cleaned[start:end]
+                symbol.calls = [c for c in _collect_js_calls(span) if c != symbol.name]
+            symbols.append(symbol)
 
         test: Optional[ParsedTest] = None
         if self.is_test(path):
