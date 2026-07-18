@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from . import store
+from .query_engine import _resolve_feature, _topic_matching_files, _topic_matching_symbols
 
 VERSION = "scope-compact-v1"
 DSL_MARKER = "--- dsl ---"
@@ -430,14 +431,30 @@ def get_inventory(
     symbols_data = store.read_json(repo_root, "symbols", {"symbols": []})
     files_index = deps.get("files", {})
     symbols = symbols_data.get("symbols", [])
+    feature_resolution = "all"
 
     if feature:
+        features = store.read_json(repo_root, "features", {"features": []})
+        aliases = store.read_json(repo_root, "aliases", {})
+        declared = _resolve_feature(feature, features.get("features", []), aliases)
+        if declared:
+            declared_id = declared["id"]
+            allowed = {
+                path for path, meta in files_index.items()
+                if meta.get("feature") == declared_id
+            }
+            feature_resolution = "declared"
+        else:
+            allowed = set(_topic_matching_files(feature, files_index, symbols))
+            feature_resolution = "indexed_topic_tokens"
+        if not allowed:
+            return {"error": f"No feature or indexed topic matched '{feature}'."}
         files_index = {
-            path: meta for path, meta in files_index.items()
-            if meta.get("feature") == feature
+            path: meta for path, meta in files_index.items() if path in allowed
         }
-        allowed = set(files_index)
         symbols = [s for s in symbols if s.get("file") in allowed]
+        if feature_resolution == "indexed_topic_tokens":
+            symbols = _topic_matching_symbols(feature, symbols)
 
     classes = [s for s in symbols if s.get("kind") == "class"]
     functions = [s for s in symbols if s.get("kind") in ("function", "method")]
@@ -454,6 +471,7 @@ def get_inventory(
     result: dict = {
         "repo": str(Path(repo_root).resolve()),
         "feature": feature,
+        "feature_resolution": feature_resolution,
         "totals": {
             "files": len(files),
             "classes": len(classes),

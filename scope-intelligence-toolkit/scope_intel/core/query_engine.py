@@ -2,6 +2,7 @@
 either compact JSON or a short human view."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -36,19 +37,42 @@ def get_feature_scope(repo_root: Path, query: str) -> dict:
     import difflib as _dl
     data = _load(repo_root)
     feature = _resolve_feature(query, data["features"]["features"], data["aliases"])
-    if not feature:
-        all_ids = [f["id"] for f in data["features"]["features"]]
-        suggestions = _dl.get_close_matches(query, all_ids, n=3, cutoff=0.4)
-        return {
-            "error": f"No feature matched '{query}'.",
-            "available": all_ids,
-            "suggestions": suggestions,
-        }
-    fid = feature["id"]
     deps = data["dependencies"]["files"]
-    syms = [s for s in data["symbols"]["symbols"] if s.get("feature") == fid]
-    tests = [t for t in data["tests"]["tests"] if fid in (t.get("covers_features") or [])]
-    files = [rel for rel, e in deps.items() if e.get("feature") == fid]
+    symbols = data["symbols"]["symbols"]
+    if not feature:
+        files = _topic_matching_files(query, deps, symbols)
+        if not files:
+            all_ids = [f["id"] for f in data["features"]["features"]]
+            suggestions = _dl.get_close_matches(query, all_ids, n=3, cutoff=0.4)
+            return {
+                "error": f"No feature matched '{query}'.",
+                "available": all_ids,
+                "suggestions": suggestions,
+            }
+        feature = _virtual_feature(query, files)
+    else:
+        fid = feature["id"]
+        files = [rel for rel, entry in deps.items() if entry.get("feature") == fid]
+    file_set = set(files)
+    syms = [symbol for symbol in symbols if symbol.get("file") in file_set]
+    if feature.get("virtual"):
+        syms = _topic_matching_symbols(query, syms)
+    if feature.get("virtual"):
+        tests = _topic_matching_tests(query, data["tests"]["tests"], file_set)
+    else:
+        tests = [
+            test
+            for test in data["tests"]["tests"]
+            if test.get("file") in file_set
+            or bool(file_set.intersection(test.get("covers_files") or []))
+            or feature["id"] in (test.get("covers_features") or [])
+        ]
+    if feature.get("virtual"):
+        feature = {
+            **feature,
+            "symbol_count": len(syms),
+            "related_tests": [test["file"] for test in tests],
+        }
     # top entry symbols (cap at 10)
     entry_syms = [s for s in syms if s["kind"] in ("function", "method") and any(
         kw in s["name"].lower()
@@ -87,9 +111,13 @@ def find_impacted_files(repo_root: Path, *, file: Optional[str] = None,
         targets.append(file)
     if feature:
         feat = _resolve_feature(feature, data["features"]["features"], data["aliases"])
-        if not feat:
-            return {"error": f"No feature matched '{feature}'."}
-        targets.extend([rel for rel, e in deps.items() if e.get("feature") == feat["id"]])
+        if feat:
+            targets.extend([rel for rel, entry in deps.items() if entry.get("feature") == feat["id"]])
+        else:
+            topic_files = _topic_matching_files(feature, deps, data["symbols"]["symbols"])
+            if not topic_files:
+                return {"error": f"No feature or indexed topic matched '{feature}'."}
+            targets.extend(topic_files)
     if symbol:
         for s in data["symbols"]["symbols"]:
             qn = s.get("qualified_name") or s["name"]
@@ -128,11 +156,25 @@ def get_related_tests(repo_root: Path, *, file: Optional[str] = None,
                     add_match(t)
     if feature:
         feat = _resolve_feature(feature, data["features"]["features"], data["aliases"])
+        feature_files: set[str]
         if feat:
             fid = feat["id"]
+            feature_files = {rel for rel, entry in deps.items() if entry.get("feature") == fid}
+        else:
+            fid = ""
+            feature_files = set(_topic_matching_files(feature, deps, data["symbols"]["symbols"]))
+        if fid:
             for t in tests:
-                if fid in (t.get("covers_features") or []):
+                covered = set(t.get("covers_files") or [])
+                if (
+                    fid in (t.get("covers_features") or [])
+                    or t.get("file") in feature_files
+                    or bool(covered.intersection(feature_files))
+                ):
                     add_match(t)
+        else:
+            for test in _topic_matching_tests(feature, tests, feature_files):
+                add_match(test)
     if not matches:
         return {"matches": [], "note": "No related tests found via covers_files/covers_features."}
     return {
@@ -282,3 +324,98 @@ def _resolve_feature(query: str, features: list, aliases: dict) -> Optional[dict
         if q in fid:
             return f
     return None
+
+
+def _topic_matching_files(query: str, files_index: dict, symbols: list) -> list[str]:
+    """Resolve a virtual feature from exact topic tokens already present in the index."""
+
+    query_tokens = _topic_tokens(query)
+    if not query_tokens:
+        return []
+    symbol_tokens_by_file: dict[str, list[set[str]]] = {}
+    for symbol in symbols:
+        file = str(symbol.get("file") or "")
+        if not file:
+            continue
+        searchable = " ".join(
+            str(value or "")
+            for value in (
+                symbol.get("name"),
+                symbol.get("qualified_name"),
+            )
+        )
+        symbol_tokens_by_file.setdefault(file, []).append(_topic_tokens(searchable))
+
+    matched: list[str] = []
+    for rel in files_index:
+        path_match = query_tokens.issubset(_topic_tokens(rel))
+        symbol_match = any(
+            query_tokens.issubset(tokens)
+            for tokens in symbol_tokens_by_file.get(rel, ())
+        )
+        if path_match or symbol_match:
+            matched.append(rel)
+    return sorted(matched)
+
+
+def _topic_tokens(value: str) -> set[str]:
+    expanded = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(value))
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", expanded.lower())
+        if len(token) >= 2
+    }
+def _topic_matching_symbols(query: str, symbols: list) -> list[dict]:
+    """Keep all symbols in topic modules and only matching symbols in shared hubs."""
+
+    query_tokens = _topic_tokens(query)
+    matches: list[dict] = []
+    for symbol in symbols:
+        file_tokens = _topic_tokens(str(symbol.get("file") or ""))
+        searchable = " ".join(
+            str(value or "")
+            for value in (symbol.get("name"), symbol.get("qualified_name"))
+        )
+        symbol_tokens = _topic_tokens(searchable)
+        if query_tokens.issubset(file_tokens) or query_tokens.issubset(symbol_tokens):
+            matches.append(symbol)
+    return matches
+
+
+
+
+def _topic_matching_tests(query: str, tests: list, feature_files: set[str]) -> list[dict]:
+    """Select virtual-feature tests without expanding through shared hub modules."""
+
+    query_tokens = _topic_tokens(query)
+    path_matched_files = {
+        path for path in feature_files if query_tokens.issubset(_topic_tokens(path))
+    }
+    matches: list[dict] = []
+    for test in tests:
+        searchable = " ".join(
+            [str(test.get("file") or "")]
+            + [str(case) for case in (test.get("cases") or [])]
+        )
+        direct_test_match = query_tokens.issubset(_topic_tokens(searchable))
+        covers_topic_path = bool(
+            path_matched_files.intersection(test.get("covers_files") or [])
+        )
+        if direct_test_match or covers_topic_path:
+            matches.append(test)
+    return matches
+
+
+def _virtual_feature(query: str, files: list[str]) -> dict:
+    identifier = "-".join(sorted(_topic_tokens(query))) or query.strip().lower()
+    return {
+        "id": identifier,
+        "aliases": [query.strip()],
+        "virtual": True,
+        "match_strategy": "indexed_topic_tokens",
+        "key_files": files[:10],
+        "file_count": len(files),
+        "symbol_count": 0,
+        "related_tests": [],
+        "depends_on_features": [],
+    }

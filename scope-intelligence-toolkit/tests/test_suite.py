@@ -104,6 +104,51 @@ def empty_repo(tmp_path):
     return tmp_path
 
 
+@pytest.fixture()
+def package_topic_repo(tmp_path):
+    """Src-layout package whose declared feature is broad but topic files are specific."""
+
+    (tmp_path / "src" / "dhi" / "automation").mkdir(parents=True)
+    (tmp_path / "src" / "dhi" / "features" / "commerce_voice").mkdir(parents=True)
+    (tmp_path / "src" / "dhi" / "voice").mkdir(parents=True)
+    (tmp_path / "src" / "dhi" / "core").mkdir(parents=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "dhi" / "automation" / "commerce.py").write_text(
+        "def compare_products(): return []\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "dhi" / "features" / "commerce_voice" / "agent.py").write_text(
+        "class CommerceVoiceAgent: pass\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "dhi" / "voice" / "commerce_response.py").write_text(
+        "def compose_commerce_response(): return ''\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "dhi" / "core" / "memory.py").write_text(
+        "def remember(): return None\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src" / "dhi" / "cli.py").write_text(
+        "def run_commerce_command(): return 0\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_commerce.py").write_text(
+        "from dhi.automation.commerce import compare_products\n"
+        "def test_compare_products(): assert compare_products() == []\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_avatar.py").write_text(
+        "from dhi.cli import run_commerce_command\n"
+        "def test_avatar_command(): assert callable(run_commerce_command)\n",
+        encoding="utf-8",
+    )
+    store.ensure_index_dir(tmp_path)
+    store.write_json(tmp_path, "config", store.default_config())
+    build_index(tmp_path)
+    return tmp_path
+
+
 # ===========================================================================
 # Phase 1+2 — Index + Query engine
 # ===========================================================================
@@ -184,6 +229,40 @@ class TestQueryEngine:
         r = get_feature_scope(repo, "nonexistent_xyz")
         assert "error" in r
 
+    def test_feature_scope_resolves_indexed_topic_when_package_feature_is_broad(self, package_topic_repo):
+        result = get_feature_scope(package_topic_repo, "commerce")
+
+        assert "error" not in result
+        assert result["feature"]["virtual"] is True
+        assert result["feature"]["match_strategy"] == "indexed_topic_tokens"
+        assert result["feature"]["symbol_count"] >= 3
+        assert result["feature"]["related_tests"] == ["tests/test_commerce.py"]
+        assert "src/dhi/automation/commerce.py" in result["files"]
+        assert "src/dhi/features/commerce_voice/agent.py" in result["files"]
+        assert "src/dhi/voice/commerce_response.py" in result["files"]
+        assert "src/dhi/core/memory.py" not in result["files"]
+        assert any(test["file"] == "tests/test_commerce.py" for test in result["tests"])
+
+        assert not any(test["file"] == "tests/test_avatar.py" for test in result["tests"])
+
+    def test_impacted_resolves_virtual_feature_files(self, package_topic_repo):
+        result = find_impacted_files(package_topic_repo, feature="commerce")
+
+        assert "error" not in result
+        assert "src/dhi/automation/commerce.py" in result["targets"]
+
+    def test_related_tests_resolve_virtual_feature_files(self, package_topic_repo):
+        result = get_related_tests(package_topic_repo, feature="commerce")
+
+        assert any(
+            match["file"] == "tests/test_commerce.py"
+            for match in result.get("matches", [])
+        )
+
+        assert not any(
+            match["file"] == "tests/test_avatar.py"
+            for match in result.get("matches", [])
+        )
     def test_find_impacted(self, repo):
         r = find_impacted_files(repo, file="src/auth/login.py")
         assert "error" not in r
@@ -1544,3 +1623,21 @@ class TestInventory:
         assert "error" not in result
         assert result["totals"]["files"] >= 1
         assert all(f["feature"] == "auth" for f in result["files"])
+
+    def test_inventory_virtual_feature_filter(self, package_topic_repo):
+        result = get_inventory(package_topic_repo, feature="commerce", include_symbols=False)
+
+        assert "error" not in result
+        assert result["feature_resolution"] == "indexed_topic_tokens"
+        files = {entry["file"] for entry in result["files"]}
+        assert "src/dhi/automation/commerce.py" in files
+        assert "src/dhi/features/commerce_voice/agent.py" in files
+        assert "src/dhi/voice/commerce_response.py" in files
+        assert "src/dhi/core/memory.py" not in files
+
+    def test_inventory_virtual_feature_limits_shared_hub_symbols(self, package_topic_repo):
+        result = get_inventory(package_topic_repo, feature="commerce")
+
+        symbol_names = {entry["name"] for entry in result["symbols"]}
+        assert "run_commerce_command" in symbol_names
+        assert "test_avatar_command" not in symbol_names
