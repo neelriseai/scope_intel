@@ -144,6 +144,10 @@ def package_topic_repo(tmp_path):
         encoding="utf-8",
     )
     store.ensure_index_dir(tmp_path)
+    (tmp_path / "tests" / "test_task_bridge.py").write_text(
+        "def test_travel_booking_request_matches_playbook(): return True\n",
+        encoding="utf-8",
+    )
     store.write_json(tmp_path, "config", store.default_config())
     build_index(tmp_path)
     return tmp_path
@@ -263,6 +267,15 @@ class TestQueryEngine:
             match["file"] == "tests/test_avatar.py"
             for match in result.get("matches", [])
         )
+
+    def test_related_tests_match_virtual_topic_in_indexed_test_case(self, package_topic_repo):
+        result = get_related_tests(package_topic_repo, feature="travel")
+
+        assert any(
+            match["file"] == "tests/test_task_bridge.py"
+            for match in result.get("matches", [])
+        )
+
     def test_find_impacted(self, repo):
         r = find_impacted_files(repo, file="src/auth/login.py")
         assert "error" not in r

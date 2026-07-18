@@ -394,9 +394,13 @@ def _topic_matching_tests(query: str, tests: list, feature_files: set[str]) -> l
     }
     matches: list[dict] = []
     for test in tests:
+        indexed_cases = [
+            *(test.get("test_cases") or []),
+            *(test.get("cases") or []),
+        ]
         searchable = " ".join(
             [str(test.get("file") or "")]
-            + [str(case) for case in (test.get("cases") or [])]
+            + [str(case) for case in indexed_cases]
         )
         direct_test_match = query_tokens.issubset(_topic_tokens(searchable))
         covers_topic_path = bool(
