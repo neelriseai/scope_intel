@@ -3026,6 +3026,28 @@ def _doc_fetch_for(
                         "chars":   len(content),
                     })
 
+
+    # Exact root/project document names are source documents, not low-priority mentions.
+    existing_doc_paths = {entry["path"] for entry in result["doc_files"]}
+    compact_slug = slug.replace("-", "")
+    for p in _project_doc_paths(repo):
+        stem = p.stem.lower()
+        if slug not in stem and compact_slug not in stem.replace("-", ""):
+            continue
+        rel = str(p.relative_to(repo)).replace("\\", "/")
+        if rel in existing_doc_paths:
+            continue
+        try:
+            content = p.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        result["doc_files"].append({
+            "id": p.stem,
+            "path": rel,
+            "layer": "project",
+            "content": content,
+            "chars": len(content),
+        })
     # --- 2. Search .ai-context/ and project docs for mentions of the feature name ---
     search_r = _doc_search(repo, feature, layer="all", context_lines=2)
     if "error" not in search_r:

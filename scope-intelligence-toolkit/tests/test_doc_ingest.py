@@ -1656,6 +1656,21 @@ class TestDocFetchFor:
         assert result["doc_search"][0]["layer"] == "project"
         assert result["doc_search"][0]["path"] == "TODO.md"
 
+    def test_fetch_for_prioritizes_exact_project_todo_filename(self, repo):
+        (repo / "TODO.md").write_text(
+            "# Build TODO\n\n- [ ] Deepen commerce evidence.\n",
+            encoding="utf-8",
+        )
+
+        result = _doc_fetch_for(repo, "todo")
+
+        assert result["total_doc_files"] == 1
+        assert result["doc_files"][0]["path"] == "TODO.md"
+        assert result["doc_files"][0]["layer"] == "project"
+        assert all(
+            excerpt["path"] != "TODO.md" for excerpt in result["doc_search"]
+        )
+
     def test_doc_files_matched_by_filename(self, repo, tmp_path):
         """A .ai-context/ file whose stem contains the slug should appear in doc_files."""
         # Create a synthetic .ai-context/generated/ file whose name contains the slug
