@@ -91,6 +91,7 @@ def get_feature_scope(repo_root: Path, query: str) -> dict:
         ],
         "tests": [
             {"file": t["file"], "framework": t.get("framework"),
+             "case_count": len(t.get("test_cases", [])),
              "cases": t.get("test_cases", [])[:5]}
             for t in tests
         ],

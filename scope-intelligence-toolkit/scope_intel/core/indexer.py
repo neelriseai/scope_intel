@@ -283,6 +283,13 @@ def build_index(repo_root: Path, *, only_files: Optional[list] = None,
         # imports first
         for imp in files_index.get(t["file"], {}).get("imports", []):
             covered.add(imp)
+        # Static tests often read HTML/CSS/JS through pathlib instead of imports.
+        for hint in t.get("covers_hints", []):
+            candidate = str(hint or "").replace("\\", "/")
+            while candidate.startswith("./"):
+                candidate = candidate[2:]
+            if candidate in files_index and candidate != t["file"]:
+                covered.add(candidate)
         # naming heuristic: test_login.py -> login.py, LoginTest.java -> Login.java
         stem = Path(t["file"]).stem.lower()
         candidates = [

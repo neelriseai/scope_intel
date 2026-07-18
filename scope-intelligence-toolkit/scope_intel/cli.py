@@ -1152,7 +1152,7 @@ def _fmt_feature(s: dict) -> None:
     if s.get("tests"):
         print("\nrelated tests:")
         for t in s["tests"]:
-            print(f"  - {t['file']}  ({t['framework']}, {len(t['cases'])} cases)")
+            print(f"  - {t['file']}  ({t['framework']}, {t.get('case_count', len(t['cases']))} cases)")
 
 
 def _fmt_impacted(s: dict) -> None:

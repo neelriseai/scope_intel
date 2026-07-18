@@ -60,8 +60,11 @@ class PythonAdapter(LanguageAdapter):
         test: Optional[ParsedTest] = None
         if self.is_test(path):
             cases = [s.name for s in symbols if s.name.startswith("test_") and s.kind in ("function", "method")]
-            test = ParsedTest(framework="pytest", test_cases=cases,
-                              covers_hints=imports_raw[:])
+            covers_hints = list(dict.fromkeys([
+                *imports_raw,
+                *self._collect_file_path_hints(tree),
+            ]))
+            test = ParsedTest(framework="pytest", test_cases=cases, covers_hints=covers_hints)
 
         return ParsedFile(
             language=self.name,
@@ -72,6 +75,46 @@ class PythonAdapter(LanguageAdapter):
             loc=loc,
             touchpoints=self._extract_touchpoints(content, symbols),
         )
+
+    @staticmethod
+    def _collect_file_path_hints(tree: ast.AST) -> list[str]:
+        """Extract repo-relative paths assembled with pathlib's division operator."""
+
+        def _parts(node: ast.AST) -> list[str]:
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+                return [*_parts(node.left), *_parts(node.right)]
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return [node.value]
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"Path", "PurePath"}
+                and node.args
+            ):
+                return _parts(node.args[0])
+            return []
+
+        hints: list[str] = []
+        seen: set[str] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.BinOp, ast.Call)):
+                continue
+            raw_parts = _parts(node)
+            segments: list[str] = []
+            for part in raw_parts:
+                segments.extend(
+                    segment
+                    for segment in re.split(r"[\\/]+", str(part))
+                    if segment not in ("", ".", "..")
+                )
+            if len(segments) < 2 or not Path(segments[-1]).suffix:
+                continue
+            hint = "/".join(segments)
+            if hint not in seen:
+                seen.add(hint)
+                hints.append(hint)
+        return hints[:100]
+
 
     @staticmethod
     def _extract_touchpoints(content: str, symbols: list) -> ParsedTouchpoints:
