@@ -66,6 +66,10 @@ def repo(tmp_path):
     (tmp_path / "src" / "auth" / "login.py").write_text(
         'import os\n'
         'SECRET = os.environ.get("SECRET", "dev")\n'
+        'MODEL = os.getenv("DHI_MODEL_NAME", "gpt-4.1")\n'
+        'def configured(env): return env.get("DHI_MODEL_API_KEY")\n'
+        'def setting(config): return config["DHI_LIVE_MODE"]\n'
+        'NOT_CONFIG = {"status": "ok"}.get("status")\n'
         'def login(user, pwd): return _token(user)\n'
         'def _token(user): return user + SECRET\n'
         'def validate(token): return len(token) > 0\n',
@@ -318,6 +322,12 @@ class TestQueryEngine:
         # SECRET env var should be indexed
         names = [c.get("name") for c in r.get("configs", [])]
         assert "SECRET" in names
+        assert "DHI_MODEL_NAME" in names
+        assert "DHI_MODEL_API_KEY" in names
+        assert "DHI_LIVE_MODE" in names
+        assert "status" not in names
+        model = next(c for c in r["configs"] if c.get("name") == "DHI_MODEL_NAME")
+        assert model["default"] == '"gpt-4.1"'
 
 
 # ===========================================================================

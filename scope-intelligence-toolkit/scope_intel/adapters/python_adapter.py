@@ -19,6 +19,8 @@ ENV_GET_RE = re.compile(
     r'os\.environ(?:\.get\(\s*["\']([A-Z_][A-Z0-9_]*)["\']'
     r'(?:\s*,\s*([^)]+?))?\s*\)|\[\s*["\']([A-Z_][A-Z0-9_]*)["\']\s*\])'
 )
+ENV_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+CONFIG_CONTAINER_NAMES = {"config", "env", "environ", "environment", "settings"}
 TABLENAME_RE = re.compile(r'__tablename__\s*=\s*["\']([^"\']+)["\']')
 SQLA_MODEL_RE = re.compile(
     r'class\s+(\w+)\s*\([^)]*\b(?:Base|Model|db\.Model|DeclarativeBase)\b'
@@ -141,6 +143,18 @@ class PythonAdapter(LanguageAdapter):
                 "name": name, "default": default,
                 "line": content[:m.start()].count("\n") + 1,
             })
+        seen_configs = {(item["name"], item["line"]) for item in tp.configs}
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            tree = None
+        if tree is not None:
+            for item in PythonAdapter._extract_mapping_configs(tree, content):
+                identity = (item["name"], item["line"])
+                if identity in seen_configs:
+                    continue
+                seen_configs.add(identity)
+                tp.configs.append(item)
         for m in SQLA_MODEL_RE.finditer(content):
             cls = m.group(1)
             line = content[:m.start()].count("\n") + 1
@@ -151,6 +165,63 @@ class PythonAdapter(LanguageAdapter):
                 "name": cls, "table": tn.group(1) if tn else None, "line": line,
             })
         return tp
+
+    @staticmethod
+    def _extract_mapping_configs(tree: ast.AST, content: str) -> list[dict]:
+        """Find environment/config reads made through injected mapping objects."""
+
+        def _container_name(node: ast.AST) -> str:
+            if isinstance(node, ast.Name):
+                return node.id.lower().lstrip("_")
+            if isinstance(node, ast.Attribute):
+                return node.attr.lower().lstrip("_")
+            return ""
+
+        def _literal_key(node: ast.AST) -> Optional[str]:
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return node.value if ENV_KEY_RE.fullmatch(node.value) else None
+            return None
+
+        def _default(node: ast.AST) -> Optional[str]:
+            segment = ast.get_source_segment(content, node)
+            if segment is not None:
+                return segment.strip()
+            if isinstance(node, ast.Constant):
+                return repr(node.value)
+            return None
+
+        configs: list[dict] = []
+        for node in ast.walk(tree):
+            key: Optional[str] = None
+            default: Optional[str] = None
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                owner = node.func.value
+                owner_name = _container_name(owner)
+                is_os_getenv = (
+                    isinstance(owner, ast.Name)
+                    and owner.id == "os"
+                    and node.func.attr == "getenv"
+                )
+                if (
+                    node.args
+                    and (is_os_getenv or (
+                        node.func.attr == "get"
+                        and owner_name in CONFIG_CONTAINER_NAMES
+                    ))
+                ):
+                    key = _literal_key(node.args[0])
+                    if key and len(node.args) > 1:
+                        default = _default(node.args[1])
+            elif isinstance(node, ast.Subscript):
+                if _container_name(node.value) in CONFIG_CONTAINER_NAMES:
+                    key = _literal_key(node.slice)
+            if key:
+                configs.append({
+                    "name": key,
+                    "default": default,
+                    "line": node.lineno,
+                })
+        return configs
 
     def _walk_top(self, node, symbols: list, parent: Optional[str],
                   source_lines: Optional[list] = None) -> None:
